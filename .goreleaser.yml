@@ -1,0 +1,77 @@
+version: 2
+project_name: local-docs-mcp
+dist: .bin
+builds:
+  - id: local-docs-mcp
+    binary: "local-docs-mcp"
+    main: ./cmd/local-docs-mcp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm
+      - arm64
+    ignore:
+      - goos: freebsd
+        goarch: arm
+      - goos: freebsd
+        goarch: arm64
+      - goos: windows
+        goarch: arm
+      - goos: windows
+        goarch: arm64
+    ldflags: "-s -w -X main.revision={{.Tag}}-{{.ShortCommit}}-{{.CommitDate}}"
+
+archives:
+  - id: local-docs-mcp
+    name_template: >-
+      {{.ProjectName}}_
+      {{- .Tag}}_
+      {{- if eq .Os "darwin"}}macos
+      {{- else if eq .Os "windows"}}win
+      {{- else}}{{.Os}}{{end}}_
+      {{- if eq .Arch "amd64"}}x86_64
+      {{- else if eq .Arch "386"}}i386
+      {{- else}}{{.Arch}}{{end}}
+    files:
+      - LICENSE
+      - README.md
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+brews:
+  - name: local-docs-mcp
+    repository:
+      owner: umputun
+      name: homebrew-apps
+      branch: master
+    commit_author:
+      name: umputun
+      email: umputun@gmail.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    homepage: "https://github.com/umputun/local-docs-mcp"
+    description: "MCP server for local documentation access"
+    license: "MIT"
+
+nfpms:
+  - id: local-docs-mcp
+    package_name: local-docs-mcp
+    file_name_template: "{{.ProjectName}}_{{.Tag}}_{{.Os}}_{{.Arch}}"
+    vendor: Umputun
+    homepage: https://github.com/umputun/local-docs-mcp
+    maintainer: Umputun <umputun@gmail.com>
+    description: MCP server for local documentation access
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    epoch: 1
+    release: 1
