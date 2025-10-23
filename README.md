@@ -1,10 +1,6 @@
-# Local Docs MCP Server (Go)
+# Local Docs MCP Server [![build](https://github.com/umputun/local-docs-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/umputun/local-docs-mcp/actions/workflows/ci.yml) &nbsp;[![Coverage Status](https://coveralls.io/repos/github/umputun/local-docs-mcp/badge.svg?branch=master)](https://coveralls.io/github/umputun/local-docs-mcp?branch=master)
 
-Go implementation of the Model Context Protocol (MCP) server for local documentation access. Provides Claude with seamless access to markdown documentation from multiple sources.
-
-## Status
-
-**Production Ready** - Fully migrated from Python with caching support
+Implementation of the Model Context Protocol (MCP) server for local documentation access. Provides Claude with seamless access to markdown documentation from multiple sources.
 
 ## Features
 
@@ -24,25 +20,30 @@ Go implementation of the Model Context Protocol (MCP) server for local documenta
 
 ## Installation
 
-### Prerequisites
+### Download Binary
 
-- Go 1.21 or later
-- Claude Code
+Download the latest release from the [releases page](https://github.com/umputun/local-docs-mcp/releases).
+
+### Using Go
+
+```bash
+go install github.com/umputun/local-docs-mcp/cmd/local-docs-mcp@latest
+```
+
+### Using Homebrew (macOS)
+
+```bash
+brew tap umputun/apps
+brew install umputun/apps/local-docs-mcp
+```
 
 ### Build from Source
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/umputun/local-docs-mcp.git
 cd local-docs-mcp
 make build
-```
-
-### Install
-
-```bash
 make install
-# Or manually:
-go install ./cmd/local-docs-mcp
 ```
 
 ### Configure Claude
