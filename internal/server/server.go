@@ -8,8 +8,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/umputun/local-docs-mcp/internal"
 	"github.com/umputun/local-docs-mcp/internal/scanner"
-	"github.com/umputun/local-docs-mcp/internal/tools"
 )
 
 // Config defines server configuration
@@ -95,10 +95,10 @@ func (s *Server) registerTools() {
 }
 
 // handleSearchDocs handles search_docs tool calls
-func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, input tools.SearchInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleSearchDocs(ctx context.Context, _ *mcp.CallToolRequest, input internal.SearchInput) (*mcp.CallToolResult, any, error) {
 	log.Printf("[DEBUG] search_docs called with query: %s", input.Query)
 
-	result, err := tools.SearchDocs(s.scanner, input.Query)
+	result, err := internal.SearchDocs(ctx, s.scanner, input.Query)
 	if err != nil {
 		return nil, nil, fmt.Errorf("search failed: %w", err)
 	}
@@ -119,10 +119,10 @@ func (s *Server) handleSearchDocs(_ context.Context, _ *mcp.CallToolRequest, inp
 }
 
 // handleReadDoc handles read_doc tool calls
-func (s *Server) handleReadDoc(_ context.Context, _ *mcp.CallToolRequest, input tools.ReadInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleReadDoc(ctx context.Context, _ *mcp.CallToolRequest, input internal.ReadInput) (*mcp.CallToolResult, any, error) {
 	log.Printf("[DEBUG] read_doc called with path: %s, source: %v", input.Path, input.Source)
 
-	result, err := tools.ReadDoc(s.scanner, input.Path, input.Source, s.config.MaxFileSize)
+	result, err := internal.ReadDoc(ctx, s.scanner, input.Path, input.Source, s.config.MaxFileSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read failed: %w", err)
 	}
@@ -142,11 +142,12 @@ func (s *Server) handleReadDoc(_ context.Context, _ *mcp.CallToolRequest, input 
 	}, result, nil
 }
 
-// handleListAllDocs handles list_all_docs tool calls
-func (s *Server) handleListAllDocs(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+// handleListAllDocs handles list_all_docs tool calls.
+// input is required by MCP SDK signature but list_all_docs takes no parameters.
+func (s *Server) handleListAllDocs(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 	log.Printf("[DEBUG] list_all_docs called")
 
-	result, err := tools.ListAllDocs(s.scanner, s.config.MaxFileSize)
+	result, err := internal.ListAllDocs(ctx, s.scanner, s.config.MaxFileSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list failed: %w", err)
 	}

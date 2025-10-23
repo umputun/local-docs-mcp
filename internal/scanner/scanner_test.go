@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,7 @@ func TestScanner_Scan(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, ".hidden.md"), []byte("# Hidden"), 0600))
 
 	scanner := NewScanner(commandsDir, docsDir, rootDir, 1024*1024)
-	files, err := scanner.Scan()
+	files, err := scanner.Scan(context.Background())
 	require.NoError(t, err)
 
 	// verify results
@@ -103,7 +104,7 @@ func TestScanner_Scan(t *testing.T) {
 func TestScanner_Scan_MissingDirectories(t *testing.T) {
 	// test with non-existent directories
 	scanner := NewScanner("/nonexistent/commands", "/nonexistent/docs", "/nonexistent/root", 1024*1024)
-	files, err := scanner.Scan()
+	files, err := scanner.Scan(context.Background())
 	require.NoError(t, err, "should not error on missing directories")
 	assert.Empty(t, files, "should return empty list for missing directories")
 }
@@ -122,7 +123,7 @@ func TestScanner_Scan_FileSizeLimit(t *testing.T) {
 	require.NoError(t, os.WriteFile(largeFile, make([]byte, 2*1024*1024), 0600))
 
 	scanner := NewScanner(commandsDir, "", "", 1024*1024)
-	files, err := scanner.Scan()
+	files, err := scanner.Scan(context.Background())
 	require.NoError(t, err)
 
 	// verify both files are in results
@@ -162,7 +163,7 @@ func TestScanner_SourcePrefixes(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("readme"), 0600))
 
 	scanner := NewScanner(commandsDir, docsDir, tmpDir, 1024*1024)
-	files, err := scanner.Scan()
+	files, err := scanner.Scan(context.Background())
 	require.NoError(t, err)
 
 	// verify source prefixes
@@ -186,7 +187,7 @@ func TestScanner_NormalizedNames(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "Test-File.md"), []byte("test"), 0600))
 
 	scanner := NewScanner(commandsDir, "", "", 1024*1024)
-	files, err := scanner.Scan()
+	files, err := scanner.Scan(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
 
