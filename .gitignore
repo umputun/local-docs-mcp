@@ -35,5 +35,5 @@ go.work
 Thumbs.db
 
 # Build artifacts
-local-docs-mcp
+/local-docs-mcp
 *.log
