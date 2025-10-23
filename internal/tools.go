@@ -39,7 +39,7 @@ type SearchOutput struct {
 }
 
 // SearchDocs searches for documentation files matching the query
-func SearchDocs(ctx context.Context, sc *scanner.Scanner, query string) (*SearchOutput, error) {
+func SearchDocs(ctx context.Context, sc scanner.Interface, query string) (*SearchOutput, error) {
 	if query == "" {
 		return &SearchOutput{
 			Results: []SearchMatch{},
@@ -141,7 +141,7 @@ type ReadOutput struct {
 }
 
 // ReadDoc reads a specific documentation file
-func ReadDoc(ctx context.Context, sc *scanner.Scanner, path string, source *string, maxSize int64) (*ReadOutput, error) {
+func ReadDoc(ctx context.Context, sc scanner.Interface, path string, source *string, maxSize int64) (*ReadOutput, error) {
 	// check context before starting
 	select {
 	case <-ctx.Done():
@@ -264,7 +264,7 @@ type ListOutput struct {
 }
 
 // ListAllDocs returns a list of all available documentation files from all sources
-func ListAllDocs(ctx context.Context, sc *scanner.Scanner, maxSize int64) (*ListOutput, error) {
+func ListAllDocs(ctx context.Context, sc scanner.Interface, maxSize int64) (*ListOutput, error) {
 	files, err := sc.Scan(ctx)
 	if err != nil {
 		return nil, err // nolint:wrapcheck // scanner error is descriptive

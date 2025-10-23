@@ -21,6 +21,15 @@ const (
 	SourceProjectRoot Source = "project-root"
 )
 
+// Interface defines the scanner interface for both regular and cached scanners
+type Interface interface {
+	Scan(ctx context.Context) ([]FileInfo, error)
+	CommandsDir() string
+	ProjectDocsDir() string
+	ProjectRootDir() string
+	Close() error
+}
+
 // SafeResolvePath resolves a user-provided path relative to baseDir with security checks.
 // It prevents path traversal, validates file existence and size, and adds .md extension if missing.
 func SafeResolvePath(baseDir, userPath string, maxSize int64) (string, error) {
@@ -301,4 +310,9 @@ func (s *Scanner) scanSource(ctx context.Context, source Source, dir, pattern st
 	}
 
 	return results, nil
+}
+
+// Close is a no-op for Scanner but required to implement Interface
+func (s *Scanner) Close() error {
+	return nil
 }

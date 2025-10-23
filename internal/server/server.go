@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -20,6 +21,8 @@ type Config struct {
 	MaxFileSize    int64
 	ServerName     string
 	Version        string
+	EnableCache    bool
+	CacheTTL       time.Duration
 }
 
 // Validate checks if the configuration is valid
@@ -36,7 +39,7 @@ func (c *Config) Validate() error {
 // Server represents the MCP server instance
 type Server struct {
 	config  Config
-	scanner *scanner.Scanner
+	scanner scanner.Interface
 	mcp     *mcp.Server
 }
 
@@ -47,13 +50,25 @@ func New(config Config) (*Server, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// create scanner
-	sc := scanner.NewScanner(
+	// create base scanner
+	baseScanner := scanner.NewScanner(
 		config.CommandsDir,
 		config.ProjectDocsDir,
 		config.ProjectRootDir,
 		config.MaxFileSize,
 	)
+
+	// wrap with caching if enabled
+	var sc scanner.Interface = baseScanner
+	if config.EnableCache {
+		cached, err := scanner.NewCachedScanner(baseScanner, config.CacheTTL)
+		if err != nil {
+			log.Printf("[WARN] failed to create cached scanner, using regular scanner: %v", err)
+		} else {
+			sc = cached
+			log.Printf("[INFO] file list caching enabled with TTL=%v", config.CacheTTL)
+		}
+	}
 
 	// create MCP server
 	mcpServer := mcp.NewServer(&mcp.Implementation{
@@ -173,6 +188,17 @@ func (s *Server) Run(ctx context.Context) error {
 	log.Printf("[INFO] scanning sources: commands=%s, docs=%s, root=%s",
 		s.config.CommandsDir, s.config.ProjectDocsDir, s.config.ProjectRootDir)
 
+	// ensure cleanup on exit
+	defer s.Close()
+
 	// run server with stdio transport
 	return s.mcp.Run(ctx, &mcp.StdioTransport{}) // nolint:wrapcheck // MCP SDK error is descriptive
+}
+
+// Close cleans up server resources
+func (s *Server) Close() error {
+	if s.scanner != nil {
+		return s.scanner.Close() // nolint:wrapcheck // scanner error is descriptive
+	}
+	return nil
 }
