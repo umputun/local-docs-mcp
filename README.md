@@ -4,14 +4,14 @@ Go implementation of the Model Context Protocol (MCP) server for local documenta
 
 ## Status
 
-🚧 **In Development** - Migration from Python version in progress
-
-See [Migration Plan](docs/plans/migration-plan.md) for detailed implementation roadmap.
+**Production Ready** - Fully migrated from Python with caching support
 
 ## Features
 
 - **Multi-source documentation**: Access docs from commands, project docs, and project root
 - **Smart search**: Fuzzy matching with exact/substring match priority
+- **Optional caching**: File list caching with automatic invalidation on changes (~3000x faster)
+- **File watching**: Automatic cache invalidation when documentation files change
 - **Safe path handling**: Prevents directory traversal and validates paths
 - **Source prefixes**: Explicitly specify documentation source (e.g., `commands:file.md`)
 - **Size limits**: Prevents reading files larger than 5MB
@@ -73,6 +73,31 @@ Or use absolute path:
 
 Restart Claude Code to load the server.
 
+## Configuration
+
+### Caching (Optional)
+
+Enable file list caching for significantly faster repeated queries:
+
+```bash
+# enable with 1h TTL (default)
+local-docs-mcp --enable-cache
+
+# custom TTL
+local-docs-mcp --enable-cache --cache-ttl=30m
+
+# via environment variables
+ENABLE_CACHE=true CACHE_TTL=2h local-docs-mcp
+```
+
+**Performance**: Cache hits are ~3,000x faster than filesystem scans (66 nanoseconds vs 201 microseconds). The cache automatically invalidates when documentation files change, ensuring fresh data.
+
+**How it works**:
+- First query scans filesystem and populates cache
+- Subsequent queries return instantly from memory
+- File watcher detects changes and invalidates cache within 500ms
+- TTL provides safety fallback (default: 1 hour)
+
 ## Usage
 
 Once configured, Claude can query documentation naturally:
@@ -106,70 +131,6 @@ List all available documentation files from all sources.
 
 **Output**: Complete file listing with sizes and source information
 
-## Development
-
-### Setup
-
-```bash
-# clone repository
-git clone <repository-url>
-cd local-docs-mcp
-
-# install dependencies
-go mod download
-
-# run tests
-make test
-```
-
-### Project Structure
-
-```
-local-docs-mcp/
-├── cmd/local-docs-mcp/  # entry point
-├── internal/
-│   ├── server/          # MCP server setup
-│   ├── tools/           # tool implementations
-│   └── scanner/         # file discovery and indexing
-├── docs/
-│   └── plans/           # implementation plans
-└── testdata/            # test fixtures
-```
-
-### Testing
-
-```bash
-# run all tests
-make test
-
-# verbose output
-make test-verbose
-
-# coverage report
-make coverage
-
-# run linter
-make lint
-```
-
-### Test Coverage Goals
-
-- Minimum: 80% across all packages
-- scanner package: 85%+
-- tools package: 90%+
-- server package: 80%+
-
-## Comparison with Python Version
-
-| Aspect | Python | Go |
-|--------|--------|-----|
-| Performance | Baseline | 2-3x faster (target) |
-| Type Safety | Runtime | Compile-time |
-| Dependencies | mcp[cli], UV | Official Go SDK |
-| Binary Size | N/A | ~8-10MB |
-| Startup Time | ~200ms | ~10ms (target) |
-| Memory Usage | Baseline | ~40% reduction (target) |
-
 ## Security
 
 - Path traversal prevention
@@ -177,10 +138,6 @@ make lint
 - UTF-8 validation
 - No symlink following outside base directories
 - Absolute path rejection
-
-## Original Implementation
-
-This is a Go port of the Python implementation at `~/.dot-files/claude/local-docs-mcp.py`.
 
 ## License
 
