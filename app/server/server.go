@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sahilm/fuzzy"
 
 	"github.com/umputun/local-docs-mcp/app/scanner"
-	"github.com/umputun/local-docs-mcp/app/tools"
 )
 
 // Config defines server configuration
@@ -90,6 +93,294 @@ func New(config Config) (*Server, error) {
 	return server, nil
 }
 
+const (
+	// fuzzyThreshold is minimum score for fuzzy matching
+	fuzzyThreshold = 0.3
+	// maxSearchResults is maximum number of results to return
+	maxSearchResults = 10
+)
+
+// SearchInput represents input for searching documentation
+type SearchInput struct {
+	Query string `json:"query"`
+}
+
+// SearchMatch represents a single search result
+type SearchMatch struct {
+	Path   string  `json:"path"`
+	Name   string  `json:"name"`
+	Score  float64 `json:"score"`
+	Source string  `json:"source"`
+}
+
+// SearchOutput contains search results
+type SearchOutput struct {
+	Results []SearchMatch `json:"results"`
+	Total   int           `json:"total"`
+}
+
+// ReadInput represents input for reading a documentation file
+type ReadInput struct {
+	Path   string  `json:"path"`
+	Source *string `json:"source,omitempty"`
+}
+
+// ReadOutput contains the result of reading a documentation file
+type ReadOutput struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Size    int    `json:"size"`
+	Source  string `json:"source"`
+}
+
+// DocInfo represents information about a documentation file
+type DocInfo struct {
+	Name     string `json:"name"`
+	Filename string `json:"filename"`
+	Source   string `json:"source"`
+	Size     int64  `json:"size,omitempty"`
+	TooLarge bool   `json:"too_large,omitempty"`
+}
+
+// ListOutput contains the result of listing all documentation files
+type ListOutput struct {
+	Docs  []DocInfo `json:"docs"`
+	Total int       `json:"total"`
+}
+
+// searchDocs searches for documentation files matching the query
+func (s *Server) searchDocs(ctx context.Context, query string) (*SearchOutput, error) {
+	if query == "" {
+		return &SearchOutput{
+			Results: []SearchMatch{},
+			Total:   0,
+		}, nil
+	}
+
+	// get all files
+	files, err := s.scanner.Scan(ctx)
+	if err != nil {
+		return nil, err // nolint:wrapcheck // scanner error is descriptive
+	}
+
+	// normalize query (lowercase, replace spaces with hyphens)
+	normalizedQuery := strings.ToLower(query)
+	normalizedQuery = strings.ReplaceAll(normalizedQuery, " ", "-")
+
+	var matches []SearchMatch
+
+	// score each file
+	for _, f := range files {
+		// check context cancellation
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
+		default:
+		}
+
+		score := s.calculateScore(normalizedQuery, f.Normalized)
+		if score > 0 {
+			matches = append(matches, SearchMatch{
+				Path:   f.Filename,
+				Name:   f.Name,
+				Score:  score,
+				Source: string(f.Source),
+			})
+		}
+	}
+
+	// sort by score descending
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Score > matches[j].Score
+	})
+
+	// limit results
+	total := len(matches)
+	if len(matches) > maxSearchResults {
+		matches = matches[:maxSearchResults]
+	}
+
+	return &SearchOutput{
+		Results: matches,
+		Total:   total,
+	}, nil
+}
+
+// calculateScore computes match score for a file
+func (s *Server) calculateScore(query, normalizedName string) float64 {
+	// exact match (case insensitive)
+	if normalizedName == query || normalizedName == query+".md" {
+		return 1.0
+	}
+
+	// substring match
+	if strings.Contains(normalizedName, query) {
+		// score based on how much of the name is the query
+		return 0.8 * (float64(len(query)) / float64(len(normalizedName)))
+	}
+
+	// fuzzy match
+	matches := fuzzy.Find(query, []string{normalizedName})
+	if len(matches) > 0 && matches[0].Score > 0 {
+		// normalize fuzzy score to 0-1 range
+		// fuzzy.Find returns lower scores for better matches
+		// we want higher scores for better matches
+		fuzzyScore := 1.0 / (1.0 + float64(matches[0].Score))
+
+		// only accept if above threshold
+		if fuzzyScore >= fuzzyThreshold {
+			return fuzzyScore * 0.7 // scale down fuzzy matches
+		}
+	}
+
+	return 0
+}
+
+// readDoc reads a specific documentation file
+func (s *Server) readDoc(ctx context.Context, path string, source *string) (*ReadOutput, error) {
+	// check context before starting
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
+	default:
+	}
+
+	// parse source prefix from path if present
+	var sourceStr string
+	cleanPath := path
+
+	if strings.Contains(path, ":") {
+		parts := strings.SplitN(path, ":", 2)
+		sourceStr = parts[0]
+		cleanPath = parts[1]
+	} else if source != nil {
+		sourceStr = *source
+	}
+
+	// map source string to directory
+	var baseDir string
+	var actualSource scanner.Source
+
+	if sourceStr != "" {
+		switch sourceStr {
+		case "commands":
+			baseDir = s.scanner.CommandsDir()
+			actualSource = scanner.SourceCommands
+		case "project-docs":
+			baseDir = s.scanner.ProjectDocsDir()
+			actualSource = scanner.SourceProjectDocs
+		case "project-root":
+			baseDir = s.scanner.ProjectRootDir()
+			actualSource = scanner.SourceProjectRoot
+		default:
+			return nil, fmt.Errorf("invalid source: %s", sourceStr)
+		}
+
+		// try to resolve and read from specified source
+		resolvedPath, err := scanner.SafeResolvePath(baseDir, cleanPath, s.config.MaxFileSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve path in %s: %w", sourceStr, err)
+		}
+
+		// check context before reading
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
+		default:
+		}
+
+		// #nosec G304 - path is validated by SafeResolvePath
+		content, err := os.ReadFile(resolvedPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read file: %w", err)
+		}
+
+		return &ReadOutput{
+			Path:    cleanPath,
+			Content: string(content),
+			Size:    len(content),
+			Source:  string(actualSource),
+		}, nil
+	}
+
+	// no source specified, try all sources in order
+	sources := []struct {
+		name string
+		dir  string
+		src  scanner.Source
+	}{
+		{"commands", s.scanner.CommandsDir(), scanner.SourceCommands},
+		{"project-docs", s.scanner.ProjectDocsDir(), scanner.SourceProjectDocs},
+		{"project-root", s.scanner.ProjectRootDir(), scanner.SourceProjectRoot},
+	}
+
+	for _, src := range sources {
+		// check context
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
+		default:
+		}
+
+		resolvedPath, err := scanner.SafeResolvePath(src.dir, cleanPath, s.config.MaxFileSize)
+		if err != nil {
+			continue // try next source
+		}
+
+		// #nosec G304 - path is validated by SafeResolvePath
+		content, err := os.ReadFile(resolvedPath)
+		if err != nil {
+			continue // try next source
+		}
+
+		return &ReadOutput{
+			Path:    cleanPath,
+			Content: string(content),
+			Size:    len(content),
+			Source:  string(src.src),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("file not found in any source: %s", cleanPath)
+}
+
+// listAllDocs returns a list of all available documentation files from all sources
+func (s *Server) listAllDocs(ctx context.Context) (*ListOutput, error) {
+	files, err := s.scanner.Scan(ctx)
+	if err != nil {
+		return nil, err // nolint:wrapcheck // scanner error is descriptive
+	}
+
+	docs := make([]DocInfo, 0, len(files))
+	for _, f := range files {
+		// check context cancellation
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
+		default:
+		}
+
+		doc := DocInfo{
+			Name:     f.Name,
+			Filename: f.Filename,
+			Source:   string(f.Source),
+			Size:     f.Size,
+		}
+
+		// mark files that exceed max size
+		if f.Size > s.config.MaxFileSize {
+			doc.TooLarge = true
+		}
+
+		docs = append(docs, doc)
+	}
+
+	return &ListOutput{
+		Docs:  docs,
+		Total: len(docs),
+	}, nil
+}
+
 // registerTools registers all MCP tools
 func (s *Server) registerTools() {
 	// register search_docs tool
@@ -112,10 +403,10 @@ func (s *Server) registerTools() {
 }
 
 // handleSearchDocs handles search_docs tool calls
-func (s *Server) handleSearchDocs(ctx context.Context, _ *mcp.CallToolRequest, input tools.SearchInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleSearchDocs(ctx context.Context, _ *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, any, error) {
 	slog.Debug("search_docs called", "query", input.Query)
 
-	result, err := tools.SearchDocs(ctx, s.scanner, input.Query)
+	result, err := s.searchDocs(ctx, input.Query)
 	if err != nil {
 		return nil, nil, fmt.Errorf("search failed: %w", err)
 	}
@@ -136,10 +427,10 @@ func (s *Server) handleSearchDocs(ctx context.Context, _ *mcp.CallToolRequest, i
 }
 
 // handleReadDoc handles read_doc tool calls
-func (s *Server) handleReadDoc(ctx context.Context, _ *mcp.CallToolRequest, input tools.ReadInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleReadDoc(ctx context.Context, _ *mcp.CallToolRequest, input ReadInput) (*mcp.CallToolResult, any, error) {
 	slog.Debug("read_doc called", "path", input.Path, "source", input.Source)
 
-	result, err := tools.ReadDoc(ctx, s.scanner, input.Path, input.Source, s.config.MaxFileSize)
+	result, err := s.readDoc(ctx, input.Path, input.Source)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read failed: %w", err)
 	}
@@ -164,7 +455,7 @@ func (s *Server) handleReadDoc(ctx context.Context, _ *mcp.CallToolRequest, inpu
 func (s *Server) handleListAllDocs(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 	slog.Debug("list_all_docs called")
 
-	result, err := tools.ListAllDocs(ctx, s.scanner, s.config.MaxFileSize)
+	result, err := s.listAllDocs(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list failed: %w", err)
 	}
