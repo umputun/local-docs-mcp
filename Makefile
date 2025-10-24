@@ -10,28 +10,28 @@ all: test build
 
 .PHONY: build
 build: ## build binary
-	cd cmd/local-docs-mcp && go build -ldflags "-X main.revision=$(REV) -s -w" -o ../../.bin/local-docs-mcp.$(BRANCH)
+	cd cmd/local-docs-mcp && go build -mod=vendor -ldflags "-X main.revision=$(REV) -s -w" -o ../../.bin/local-docs-mcp.$(BRANCH)
 	cp .bin/local-docs-mcp.$(BRANCH) .bin/local-docs-mcp
 
 .PHONY: install
 install: ## install binary to GOPATH/bin
-	go install -ldflags "-X main.revision=$(REV) -s -w" ./cmd/local-docs-mcp
+	go install -mod=vendor -ldflags "-X main.revision=$(REV) -s -w" ./cmd/local-docs-mcp
 
 .PHONY: test
 test: ## run tests with race detector
 	go clean -testcache
-	go test -race -coverprofile=coverage.out ./...
+	go test -mod=vendor -race -coverprofile=coverage.out ./...
 	grep -v "_mock.go" coverage.out | grep -v mocks > coverage_no_mocks.out
 	go tool cover -func=coverage_no_mocks.out
 	rm coverage.out coverage_no_mocks.out
 
 .PHONY: test-verbose
 test-verbose: ## run tests with verbose output
-	go test -v -race -cover ./...
+	go test -mod=vendor -v -race -cover ./...
 
 .PHONY: coverage
 coverage: ## generate coverage report
-	go test -coverprofile=coverage.out ./...
+	go test -mod=vendor -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
@@ -56,11 +56,11 @@ deps: ## download dependencies
 
 .PHONY: run
 run: ## run the server
-	go run ./cmd/local-docs-mcp
+	go run -mod=vendor ./cmd/local-docs-mcp
 
 .PHONY: bench
 bench: ## run benchmarks
-	go test -bench=. -benchmem ./...
+	go test -mod=vendor -bench=. -benchmem ./...
 
 .PHONY: version
 version: ## show version info

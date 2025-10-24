@@ -1,0 +1,47 @@
+# github.com/davecgh/go-spew v1.1.1
+## explicit
+github.com/davecgh/go-spew/spew
+# github.com/fsnotify/fsnotify v1.9.0
+## explicit; go 1.17
+github.com/fsnotify/fsnotify
+github.com/fsnotify/fsnotify/internal
+# github.com/go-pkgz/expirable-cache/v3 v3.1.0
+## explicit; go 1.20
+github.com/go-pkgz/expirable-cache/v3
+# github.com/google/jsonschema-go v0.3.0
+## explicit; go 1.23.0
+github.com/google/jsonschema-go/jsonschema
+# github.com/jessevdk/go-flags v1.6.1
+## explicit; go 1.20
+github.com/jessevdk/go-flags
+# github.com/kylelemons/godebug v1.1.0
+## explicit; go 1.11
+# github.com/modelcontextprotocol/go-sdk v1.0.0
+## explicit; go 1.23.0
+github.com/modelcontextprotocol/go-sdk/auth
+github.com/modelcontextprotocol/go-sdk/internal/jsonrpc2
+github.com/modelcontextprotocol/go-sdk/internal/util
+github.com/modelcontextprotocol/go-sdk/internal/xcontext
+github.com/modelcontextprotocol/go-sdk/jsonrpc
+github.com/modelcontextprotocol/go-sdk/mcp
+# github.com/pmezard/go-difflib v1.0.0
+## explicit
+github.com/pmezard/go-difflib/difflib
+# github.com/sahilm/fuzzy v0.1.1
+## explicit
+github.com/sahilm/fuzzy
+# github.com/stretchr/testify v1.11.1
+## explicit; go 1.17
+github.com/stretchr/testify/assert
+github.com/stretchr/testify/assert/yaml
+github.com/stretchr/testify/require
+# github.com/yosida95/uritemplate/v3 v3.0.2
+## explicit; go 1.14
+github.com/yosida95/uritemplate/v3
+# golang.org/x/sys v0.21.0
+## explicit; go 1.18
+golang.org/x/sys/unix
+golang.org/x/sys/windows
+# gopkg.in/yaml.v3 v3.0.1
+## explicit
+gopkg.in/yaml.v3

@@ -5,6 +5,8 @@ builds:
   - id: local-docs-mcp
     binary: "local-docs-mcp"
     main: ./cmd/local-docs-mcp
+    flags:
+      - -mod=vendor
     env:
       - CGO_ENABLED=0
     goos:
