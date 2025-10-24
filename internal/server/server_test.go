@@ -401,3 +401,68 @@ func TestServerConfig_Validate(t *testing.T) {
 		})
 	}
 }
+
+func TestServer_Close(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	tests := []struct {
+		name        string
+		config      Config
+		enableCache bool
+	}{
+		{
+			name: "close server with regular scanner",
+			config: Config{
+				CommandsDir:    commandsDir,
+				ProjectDocsDir: tmpDir,
+				ProjectRootDir: "",
+				MaxFileSize:    1024 * 1024,
+				ServerName:     "test",
+				Version:        "1.0",
+				EnableCache:    false,
+			},
+			enableCache: false,
+		},
+		{
+			name: "close server with cached scanner",
+			config: Config{
+				CommandsDir:    commandsDir,
+				ProjectDocsDir: tmpDir,
+				ProjectRootDir: "",
+				MaxFileSize:    1024 * 1024,
+				ServerName:     "test",
+				Version:        "1.0",
+				EnableCache:    true,
+			},
+			enableCache: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, err := New(tt.config)
+			require.NoError(t, err)
+			require.NotNil(t, srv)
+
+			// close server
+			err = srv.Close()
+			assert.NoError(t, err)
+
+			// close should be idempotent
+			err = srv.Close()
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestServer_Close_NilScanner(t *testing.T) {
+	// test close with nil scanner (shouldn't happen in practice but test defensively)
+	srv := &Server{
+		scanner: nil,
+	}
+
+	err := srv.Close()
+	assert.NoError(t, err)
+}

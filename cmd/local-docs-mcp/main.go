@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,8 +25,12 @@ const (
 
 // Options defines command line options
 type Options struct {
-	EnableCache bool          `long:"enable-cache" env:"ENABLE_CACHE" description:"enable file list caching with automatic invalidation"`
-	CacheTTL    time.Duration `long:"cache-ttl" env:"CACHE_TTL" default:"1h" description:"cache TTL (time-to-live) for file list"`
+	SharedDocsDir  string        `long:"shared-docs-dir" env:"SHARED_DOCS_DIR" default:"~/.claude/commands" description:"shared documentation directory"`
+	ProjectDocsDir string        `long:"docs-dir" env:"DOCS_DIR" default:"docs" description:"project docs directory"`
+	EnableRootDocs bool          `long:"enable-root-docs" env:"ENABLE_ROOT_DOCS" description:"enable scanning root *.md files"`
+	ExcludeDirs    []string      `long:"exclude-dir" env:"EXCLUDE_DIRS" env-delim:"," default:"plans" description:"directories to exclude from docs scan"`
+	EnableCache    bool          `long:"enable-cache" env:"ENABLE_CACHE" description:"enable file list caching with automatic invalidation"`
+	CacheTTL       time.Duration `long:"cache-ttl" env:"CACHE_TTL" default:"1h" description:"cache TTL (time-to-live) for file list"`
 }
 
 func main() {
@@ -49,26 +54,33 @@ func run() error {
 		return fmt.Errorf("failed to parse flags: %w", err)
 	}
 
-	// determine directories
-	homeDir, err := os.UserHomeDir()
+	// expand ~ in shared docs dir
+	sharedDocsDir, err := expandTilde(opts.SharedDocsDir)
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return err
 	}
 
+	// get current directory (project root)
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
-	commandsDir := filepath.Join(homeDir, ".claude", "commands")
-	projectDocsDir := filepath.Join(cwd, "docs")
-	projectRootDir := cwd
+	// project docs dir is relative to cwd
+	projectDocsDir := filepath.Join(cwd, opts.ProjectDocsDir)
+
+	// project root dir - only used if EnableRootDocs is true
+	projectRootDir := ""
+	if opts.EnableRootDocs {
+		projectRootDir = cwd
+	}
 
 	// create server config
 	config := server.Config{
-		CommandsDir:    commandsDir,
+		CommandsDir:    sharedDocsDir,
 		ProjectDocsDir: projectDocsDir,
 		ProjectRootDir: projectRootDir,
+		ExcludeDirs:    opts.ExcludeDirs,
 		MaxFileSize:    maxFileSize,
 		ServerName:     "local-docs",
 		Version:        revision,
@@ -103,4 +115,16 @@ func run() error {
 
 	log.Printf("[INFO] server stopped")
 	return nil
+}
+
+// expandTilde expands ~ prefix in path to user home directory
+func expandTilde(path string) (string, error) {
+	if !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return filepath.Join(homeDir, path[2:]), nil
 }

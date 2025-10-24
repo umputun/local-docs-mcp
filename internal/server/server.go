@@ -18,6 +18,7 @@ type Config struct {
 	CommandsDir    string
 	ProjectDocsDir string
 	ProjectRootDir string
+	ExcludeDirs    []string
 	MaxFileSize    int64
 	ServerName     string
 	Version        string
@@ -51,12 +52,13 @@ func New(config Config) (*Server, error) {
 	}
 
 	// create base scanner
-	baseScanner := scanner.NewScanner(
-		config.CommandsDir,
-		config.ProjectDocsDir,
-		config.ProjectRootDir,
-		config.MaxFileSize,
-	)
+	baseScanner := scanner.NewScanner(scanner.Params{
+		CommandsDir:    config.CommandsDir,
+		ProjectDocsDir: config.ProjectDocsDir,
+		ProjectRootDir: config.ProjectRootDir,
+		MaxFileSize:    config.MaxFileSize,
+		ExcludeDirs:    config.ExcludeDirs,
+	})
 
 	// wrap with caching if enabled
 	var sc scanner.Interface = baseScanner

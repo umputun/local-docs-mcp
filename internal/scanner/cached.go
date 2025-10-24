@@ -166,8 +166,8 @@ func (cs *CachedScanner) addWatchRecursive(dir string) error {
 			return nil
 		}
 
-		// skip plans directory
-		if info.IsDir() && filepath.Base(path) == "plans" {
+		// skip excluded directories
+		if info.IsDir() && cs.scanner.shouldExcludeDir(filepath.Base(path)) {
 			return filepath.SkipDir
 		}
 
@@ -238,8 +238,8 @@ func (cs *CachedScanner) isRelevantEvent(event fsnotify.Event) bool {
 		return false
 	}
 
-	// skip plans directory
-	if strings.Contains(event.Name, "/plans/") || strings.Contains(event.Name, "\\plans\\") {
+	// skip excluded directories
+	if cs.isInExcludedPath(event.Name) {
 		return false
 	}
 
@@ -249,4 +249,19 @@ func (cs *CachedScanner) isRelevantEvent(event fsnotify.Event) bool {
 // invalidate clears the cache
 func (cs *CachedScanner) invalidate() {
 	cs.cache.Invalidate(cacheKey)
+}
+
+// isInExcludedPath checks if file path contains any excluded directory
+func (cs *CachedScanner) isInExcludedPath(path string) bool {
+	// normalize path to use forward slashes for cross-platform compatibility
+	normalizedPath := filepath.ToSlash(path)
+	pathParts := strings.Split(normalizedPath, "/")
+
+	// check if any path component matches excluded directories
+	for _, part := range pathParts {
+		if cs.scanner.shouldExcludeDir(part) {
+			return true
+		}
+	}
+	return false
 }

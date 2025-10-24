@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	// FuzzyThreshold is minimum score for fuzzy matching
-	FuzzyThreshold = 0.3
-	// MaxSearchResults is maximum number of results to return
-	MaxSearchResults = 10
+	// fuzzyThreshold is minimum score for fuzzy matching
+	fuzzyThreshold = 0.3
+	// maxSearchResults is maximum number of results to return
+	maxSearchResults = 10
 )
 
 // SearchInput represents input for searching documentation
@@ -86,8 +86,8 @@ func SearchDocs(ctx context.Context, sc scanner.Interface, query string) (*Searc
 
 	// limit results
 	total := len(matches)
-	if len(matches) > MaxSearchResults {
-		matches = matches[:MaxSearchResults]
+	if len(matches) > maxSearchResults {
+		matches = matches[:maxSearchResults]
 	}
 
 	return &SearchOutput{
@@ -118,7 +118,7 @@ func calculateScore(query, normalizedName string) float64 {
 		fuzzyScore := 1.0 / (1.0 + float64(matches[0].Score))
 
 		// only accept if above threshold
-		if fuzzyScore >= FuzzyThreshold {
+		if fuzzyScore >= fuzzyThreshold {
 			return fuzzyScore * 0.7 // scale down fuzzy matches
 		}
 	}

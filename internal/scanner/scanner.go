@@ -15,7 +15,7 @@ type Source string
 const (
 	// SourceCommands represents ~/.claude/commands documentation
 	SourceCommands Source = "commands"
-	// SourceProjectDocs represents project docs (excluding plans/)
+	// SourceProjectDocs represents project docs (with configurable exclusions)
 	SourceProjectDocs Source = "project-docs"
 	// SourceProjectRoot represents root-level markdown files
 	SourceProjectRoot Source = "project-root"
@@ -95,21 +95,32 @@ type FileInfo struct {
 	Size       int64  // file size in bytes
 }
 
+// Params contains parameters for creating a scanner
+type Params struct {
+	CommandsDir    string
+	ProjectDocsDir string
+	ProjectRootDir string
+	MaxFileSize    int64
+	ExcludeDirs    []string
+}
+
 // Scanner discovers and indexes documentation files from multiple sources
 type Scanner struct {
 	commandsDir    string
 	projectDocsDir string
 	projectRootDir string
 	maxFileSize    int64
+	excludeDirs    []string
 }
 
 // NewScanner creates a new scanner instance
-func NewScanner(commandsDir, projectDocsDir, projectRootDir string, maxFileSize int64) *Scanner {
+func NewScanner(params Params) *Scanner {
 	return &Scanner{
-		commandsDir:    commandsDir,
-		projectDocsDir: projectDocsDir,
-		projectRootDir: projectRootDir,
-		maxFileSize:    maxFileSize,
+		commandsDir:    params.CommandsDir,
+		projectDocsDir: params.ProjectDocsDir,
+		projectRootDir: params.ProjectRootDir,
+		maxFileSize:    params.MaxFileSize,
+		excludeDirs:    params.ExcludeDirs,
 	}
 }
 
@@ -157,7 +168,7 @@ func (s *Scanner) Scan(ctx context.Context) ([]FileInfo, error) {
 	default:
 	}
 
-	// scan project docs (excluding plans/)
+	// scan project docs (with configurable exclusions)
 	docFiles, err := s.scanSource(ctx, SourceProjectDocs, s.projectDocsDir, "**/*.md")
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -189,8 +200,6 @@ func (s *Scanner) Scan(ctx context.Context) ([]FileInfo, error) {
 
 // scanSource scans a single source directory for markdown files
 func (s *Scanner) scanSource(ctx context.Context, source Source, dir, pattern string) ([]FileInfo, error) {
-	var results []FileInfo
-
 	// check context before starting
 	select {
 	case <-ctx.Done():
@@ -200,112 +209,121 @@ func (s *Scanner) scanSource(ctx context.Context, source Source, dir, pattern st
 
 	// check if directory exists
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return results, err // nolint:wrapcheck // returning os error as-is is acceptable
+		return nil, err // nolint:wrapcheck // returning os error as-is is acceptable
 	}
 
 	// determine if recursive scan needed
 	recursive := strings.Contains(pattern, "**")
+	if recursive {
+		return s.scanRecursive(ctx, source, dir)
+	}
+	return s.scanFlat(ctx, source, dir)
+}
 
-	if recursive { // nolint:nestif // directory walking requires nested conditions
-		// walk directory tree
-		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			// check context cancellation
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
+// scanRecursive performs recursive directory scanning for markdown files
+func (s *Scanner) scanRecursive(ctx context.Context, source Source, dir string) ([]FileInfo, error) {
+	var results []FileInfo
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		// check context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err != nil {
+			return nil // skip errors
+		}
+
+		// skip hidden files and directories
+		if strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return fs.SkipDir
 			}
+			return nil
+		}
 
+		// exclude configured directories from project docs
+		if d.IsDir() && source == SourceProjectDocs && s.shouldExcludeDir(d.Name()) {
+			return fs.SkipDir
+		}
+
+		// process only .md files
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".md") {
+			info, err := d.Info()
 			if err != nil {
-				return nil // skip errors
+				return nil // skip files we can't stat
 			}
 
-			// skip hidden files and directories
-			if strings.HasPrefix(d.Name(), ".") {
-				if d.IsDir() {
-					return fs.SkipDir
-				}
+			relPath, err := filepath.Rel(dir, path)
+			if err != nil {
 				return nil
 			}
 
-			// exclude docs/plans/ directory
-			if d.IsDir() && source == SourceProjectDocs {
-				if d.Name() == "plans" {
-					return fs.SkipDir
-				}
+			fileInfo := FileInfo{
+				Name:       filepath.Base(path),
+				Filename:   string(source) + ":" + filepath.ToSlash(relPath),
+				Normalized: strings.ToLower(filepath.Base(path)),
+				Source:     source,
+				Path:       path,
+				Size:       info.Size(),
 			}
-
-			// process only .md files
-			if !d.IsDir() && strings.HasSuffix(d.Name(), ".md") {
-				info, err := d.Info()
-				if err != nil {
-					return nil // skip files we can't stat
-				}
-
-				relPath, err := filepath.Rel(dir, path)
-				if err != nil {
-					return nil
-				}
-
-				fileInfo := FileInfo{
-					Name:       filepath.Base(path),
-					Filename:   string(source) + ":" + filepath.ToSlash(relPath),
-					Normalized: strings.ToLower(filepath.Base(path)),
-					Source:     source,
-					Path:       path,
-					Size:       info.Size(),
-				}
-				results = append(results, fileInfo)
-			}
-
-			return nil
-		})
-		if err != nil {
-			return nil, err // nolint:wrapcheck // filepath.WalkDir error is descriptive as-is
-		}
-	} else {
-		// non-recursive: only scan immediate directory
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return nil, err // nolint:wrapcheck // os.ReadDir error is descriptive as-is
+			results = append(results, fileInfo)
 		}
 
-		for _, entry := range entries {
-			// check context cancellation
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
-			default:
+		return nil
+	})
+	if err != nil {
+		return nil, err // nolint:wrapcheck // filepath.WalkDir error is descriptive as-is
+	}
+	return results, nil
+}
+
+// scanFlat performs non-recursive (flat) directory scanning for markdown files
+func (s *Scanner) scanFlat(ctx context.Context, source Source, dir string) ([]FileInfo, error) {
+	var results []FileInfo
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err // nolint:wrapcheck // os.ReadDir error is descriptive as-is
+	}
+
+	for _, entry := range entries {
+		// check context cancellation
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
+		default:
+		}
+
+		// skip hidden files
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		// skip directories
+		if entry.IsDir() {
+			continue
+		}
+
+		// process only .md files
+		if strings.HasSuffix(entry.Name(), ".md") {
+			path := filepath.Join(dir, entry.Name())
+			info, err := entry.Info()
+			if err != nil {
+				continue // skip files we can't stat
 			}
 
-			// skip hidden files
-			if strings.HasPrefix(entry.Name(), ".") {
-				continue
+			fileInfo := FileInfo{
+				Name:       entry.Name(),
+				Filename:   string(source) + ":" + entry.Name(),
+				Normalized: strings.ToLower(entry.Name()),
+				Source:     source,
+				Path:       path,
+				Size:       info.Size(),
 			}
-
-			// skip directories
-			if entry.IsDir() {
-				continue
-			}
-
-			// process only .md files
-			if strings.HasSuffix(entry.Name(), ".md") {
-				path := filepath.Join(dir, entry.Name())
-				info, err := entry.Info()
-				if err != nil {
-					continue // skip files we can't stat
-				}
-
-				fileInfo := FileInfo{
-					Name:       entry.Name(),
-					Filename:   string(source) + ":" + entry.Name(),
-					Normalized: strings.ToLower(entry.Name()),
-					Source:     source,
-					Path:       path,
-					Size:       info.Size(),
-				}
-				results = append(results, fileInfo)
-			}
+			results = append(results, fileInfo)
 		}
 	}
 
@@ -315,4 +333,14 @@ func (s *Scanner) scanSource(ctx context.Context, source Source, dir, pattern st
 // Close is a no-op for Scanner but required to implement Interface
 func (s *Scanner) Close() error {
 	return nil
+}
+
+// shouldExcludeDir checks if directory should be excluded based on excludeDirs list
+func (s *Scanner) shouldExcludeDir(dirName string) bool {
+	for _, excludeDir := range s.excludeDirs {
+		if dirName == excludeDir {
+			return true
+		}
+	}
+	return false
 }

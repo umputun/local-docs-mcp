@@ -29,7 +29,7 @@ func TestSearchDocs(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(docsDir, "architecture.md"), []byte("arch"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(docsDir, "testing.md"), []byte("test"), 0600))
 
-	sc := scanner.NewScanner(commandsDir, docsDir, tmpDir, 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, ProjectDocsDir: docsDir, ProjectRootDir: tmpDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	tests := []struct {
@@ -109,7 +109,7 @@ func TestSearchDocs_ScoreSorting(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "testing.md"), []byte("substring"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "atestb.md"), []byte("contains"), 0600))
 
-	sc := scanner.NewScanner(commandsDir, "", "", 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	result, err := SearchDocs(ctx, sc, "test")
@@ -132,7 +132,7 @@ func TestSearchDocs_LimitResults(t *testing.T) {
 		require.NoError(t, os.WriteFile(filename, []byte("test"), 0600))
 	}
 
-	sc := scanner.NewScanner(commandsDir, "", "", 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	result, err := SearchDocs(ctx, sc, "test")
@@ -149,7 +149,7 @@ func TestSearchDocs_EmptyQuery(t *testing.T) {
 	require.NoError(t, os.MkdirAll(commandsDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "test.md"), []byte("test"), 0600))
 
-	sc := scanner.NewScanner(commandsDir, "", "", 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	result, err := SearchDocs(ctx, sc, "")
@@ -166,7 +166,7 @@ func TestSearchDocs_NormalizedMatching(t *testing.T) {
 	// create file with hyphens and mixed case
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "Go-Test-Example.md"), []byte("test"), 0600))
 
-	sc := scanner.NewScanner(commandsDir, "", "", 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	// search with spaces (should convert to hyphens)
@@ -182,7 +182,7 @@ func TestSearchDocs_ContextCancellation(t *testing.T) {
 	require.NoError(t, os.MkdirAll(commandsDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "test.md"), []byte("test"), 0600))
 
-	sc := scanner.NewScanner(commandsDir, "", "", 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 
 	// create cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -207,7 +207,7 @@ func TestReadDoc(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(docsDir, "doc.md"), []byte("docs content"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("readme content"), 0600))
 
-	sc := scanner.NewScanner(commandsDir, docsDir, tmpDir, 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, ProjectDocsDir: docsDir, ProjectRootDir: tmpDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	tests := []struct {
@@ -290,7 +290,7 @@ func TestReadDoc_AutoAddExtension(t *testing.T) {
 	require.NoError(t, os.MkdirAll(commandsDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "test.md"), []byte("content"), 0600))
 
-	sc := scanner.NewScanner(commandsDir, "", "", 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	// should work with or without .md extension
@@ -312,7 +312,7 @@ func TestReadDoc_SizeLimit(t *testing.T) {
 	largeContent := make([]byte, 2000)
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "large.md"), largeContent, 0600))
 
-	sc := scanner.NewScanner(commandsDir, "", "", 1000)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, MaxFileSize: 1000, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	_, err := ReadDoc(ctx, sc, "large.md", nil, 1000)
@@ -329,7 +329,7 @@ func TestReadDoc_ContextCancellation(t *testing.T) {
 	require.NoError(t, os.MkdirAll(commandsDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "test.md"), []byte("content"), 0600))
 
-	sc := scanner.NewScanner(commandsDir, "", "", 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -354,7 +354,7 @@ func TestListAllDocs(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("readme"), 0600))
 
 	// create scanner
-	sc := scanner.NewScanner(commandsDir, docsDir, tmpDir, 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, ProjectDocsDir: docsDir, ProjectRootDir: tmpDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	result, err := ListAllDocs(ctx, sc, 1024*1024)
@@ -388,7 +388,7 @@ func TestListAllDocs_TooLargeFiles(t *testing.T) {
 	largeContent := make([]byte, 2000)
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "large.md"), largeContent, 0600))
 
-	sc := scanner.NewScanner(commandsDir, "", "", 1000)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, MaxFileSize: 1000, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	result, err := ListAllDocs(ctx, sc, 1000)
@@ -415,7 +415,7 @@ func TestListAllDocs_ContextCancellation(t *testing.T) {
 	require.NoError(t, os.MkdirAll(commandsDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "test.md"), []byte("test"), 0600))
 
-	sc := scanner.NewScanner(commandsDir, "", "", 1024*1024)
+	sc := scanner.NewScanner(scanner.Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

@@ -14,9 +14,9 @@ Implementation of the Model Context Protocol (MCP) server for local documentatio
 
 ## Documentation Sources
 
-1. **Commands** (`~/.claude/commands/**/*.md`): User commands and knowledge bases
-2. **Project Docs** (`$CWD/docs/**/*.md`): Project-specific documentation (excludes `plans/`)
-3. **Project Root** (`$CWD/*.md`): Root-level docs like README.md, CONTRIBUTING.md
+1. **Shared Docs** (`~/.claude/commands/**/*.md`): User commands and knowledge bases (configurable)
+2. **Project Docs** (`$CWD/docs/**/*.md`): Project-specific documentation with configurable exclusions
+3. **Project Root** (`$CWD/*.md`): Root-level docs like README.md, CONTRIBUTING.md (opt-in)
 
 ## Installation
 
@@ -75,6 +75,30 @@ Or use absolute path:
 Restart Claude Code to load the server.
 
 ## Configuration
+
+### Command Line Options
+
+```bash
+# customize documentation directories
+local-docs-mcp --shared-docs-dir=~/.my-docs --docs-dir=documentation
+
+# enable root-level markdown scanning
+local-docs-mcp --enable-root-docs
+
+# exclude directories from project docs scan
+local-docs-mcp --exclude-dir=plans --exclude-dir=drafts
+
+# multiple exclusions via environment variable
+EXCLUDE_DIRS=plans,drafts,archive local-docs-mcp
+```
+
+Available options:
+- `--shared-docs-dir` - shared documentation directory (default: `~/.claude/commands`)
+- `--docs-dir` - project docs directory (default: `docs`)
+- `--enable-root-docs` - scan root-level `*.md` files (default: disabled)
+- `--exclude-dir` - directories to exclude from project docs scan (default: `plans`)
+- `--enable-cache` - enable file list caching
+- `--cache-ttl` - cache time-to-live (default: `1h`)
 
 ### Caching (Optional)
 

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestNewCachedScanner(t *testing.T) {
 	commandsDir := filepath.Join(tmpDir, "commands")
 	require.NoError(t, os.MkdirAll(commandsDir, 0755))
 
-	scanner := NewScanner(commandsDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	cached, err := NewCachedScanner(scanner, 1*time.Hour)
 	require.NoError(t, err)
 	require.NotNil(t, cached)
@@ -38,7 +38,7 @@ func TestCachedScanner_Scan_CacheHitMiss(t *testing.T) {
 	// create test file
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "test.md"), []byte("test"), 0600))
 
-	scanner := NewScanner(commandsDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	cached, err := NewCachedScanner(scanner, 1*time.Hour)
 	require.NoError(t, err)
 	defer cached.Close()
@@ -71,7 +71,7 @@ func TestCachedScanner_Invalidate(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "test.md"), []byte("test"), 0600))
 
-	scanner := NewScanner(commandsDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	cached, err := NewCachedScanner(scanner, 1*time.Hour)
 	require.NoError(t, err)
 	defer cached.Close()
@@ -103,7 +103,7 @@ func TestCachedScanner_ContextCancellation(t *testing.T) {
 	commandsDir := filepath.Join(tmpDir, "commands")
 	require.NoError(t, os.MkdirAll(commandsDir, 0755))
 
-	scanner := NewScanner(commandsDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	cached, err := NewCachedScanner(scanner, 1*time.Hour)
 	require.NoError(t, err)
 	defer cached.Close()
@@ -121,7 +121,7 @@ func TestCachedScanner_Close(t *testing.T) {
 	commandsDir := filepath.Join(tmpDir, "commands")
 	require.NoError(t, os.MkdirAll(commandsDir, 0755))
 
-	scanner := NewScanner(commandsDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	cached, err := NewCachedScanner(scanner, 1*time.Hour)
 	require.NoError(t, err)
 
@@ -136,7 +136,7 @@ func TestCachedScanner_Close(t *testing.T) {
 
 func TestCachedScanner_IsRelevantEvent(t *testing.T) {
 	tmpDir := t.TempDir()
-	scanner := NewScanner(tmpDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: tmpDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	cached, err := NewCachedScanner(scanner, 1*time.Hour)
 	require.NoError(t, err)
 	defer cached.Close()
@@ -181,12 +181,28 @@ func TestCachedScanner_IsRelevantEvent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// this is a unit test, we're just testing the logic
-			// actual fsnotify.Event would be created by the watcher
-			assert.Equal(t, tt.expected,
-				strings.HasSuffix(tt.path, ".md") &&
-				!strings.HasPrefix(filepath.Base(tt.path), ".") &&
-				!strings.Contains(tt.path, "/plans/"))
+			// create actual fsnotify.Event
+			var op fsnotify.Op
+			switch tt.op {
+			case "write":
+				op = fsnotify.Write
+			case "create":
+				op = fsnotify.Create
+			case "remove":
+				op = fsnotify.Remove
+			case "rename":
+				op = fsnotify.Rename
+			default:
+				op = fsnotify.Write
+			}
+
+			event := fsnotify.Event{
+				Name: tt.path,
+				Op:   op,
+			}
+
+			result := cached.isRelevantEvent(event)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -204,7 +220,7 @@ func TestCachedScanner_Integration(t *testing.T) {
 	testFile := filepath.Join(commandsDir, "test.md")
 	require.NoError(t, os.WriteFile(testFile, []byte("initial"), 0600))
 
-	scanner := NewScanner(commandsDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	cached, err := NewCachedScanner(scanner, 1*time.Hour)
 	require.NoError(t, err)
 	defer cached.Close()
@@ -239,7 +255,7 @@ func TestCachedScanner_TTLExpiration(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "test.md"), []byte("test"), 0600))
 
-	scanner := NewScanner(commandsDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	// use very short TTL for testing
 	cached, err := NewCachedScanner(scanner, 100*time.Millisecond)
 	require.NoError(t, err)
@@ -275,7 +291,7 @@ func BenchmarkScanner_Scan(b *testing.B) {
 		require.NoError(b, os.WriteFile(filename, []byte("test content"), 0600))
 	}
 
-	scanner := NewScanner(commandsDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -298,7 +314,7 @@ func BenchmarkCachedScanner_ScanCacheMiss(b *testing.B) {
 		require.NoError(b, os.WriteFile(filename, []byte("test content"), 0600))
 	}
 
-	scanner := NewScanner(commandsDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -332,7 +348,7 @@ func BenchmarkCachedScanner_ScanCacheHit(b *testing.B) {
 		require.NoError(b, os.WriteFile(filename, []byte("test content"), 0600))
 	}
 
-	scanner := NewScanner(commandsDir, "", "", 1024*1024)
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
 	cached, err := NewCachedScanner(scanner, 1*time.Hour)
 	require.NoError(b, err)
 	defer cached.Close()
