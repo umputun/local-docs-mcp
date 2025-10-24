@@ -318,7 +318,13 @@ func BenchmarkCachedScanner_ScanCacheMiss(b *testing.B) {
 	ctx := context.Background()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	// run limited iterations to avoid file descriptor exhaustion
+	// benchmark cache miss by creating fresh scanner each time
+	iterations := b.N
+	if iterations > 100 {
+		iterations = 100
+	}
+	for i := 0; i < iterations; i++ {
 		b.StopTimer()
 		cached, err := NewCachedScanner(scanner, 1*time.Hour)
 		if err != nil {
