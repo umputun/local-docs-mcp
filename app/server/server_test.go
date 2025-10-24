@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/umputun/local-docs-mcp/internal"
+	"github.com/umputun/local-docs-mcp/app/tools"
 )
 
 func TestNew(t *testing.T) {
@@ -174,7 +174,7 @@ func TestServerSearchDocsHandler(t *testing.T) {
 			// call the handler directly
 			ctx := context.Background()
 			req := &mcp.CallToolRequest{}
-			input := internal.SearchInput{Query: tt.query}
+			input := tools.SearchInput{Query: tt.query}
 
 			result, output, err := srv.handleSearchDocs(ctx, req, input)
 			require.NoError(t, err)
@@ -182,7 +182,7 @@ func TestServerSearchDocsHandler(t *testing.T) {
 			assert.NotNil(t, output)
 
 			// verify output structure
-			searchOutput, ok := output.(*internal.SearchOutput)
+			searchOutput, ok := output.(*tools.SearchOutput)
 			require.True(t, ok)
 			assert.Equal(t, tt.wantTotal, searchOutput.Total)
 
@@ -258,7 +258,7 @@ func TestServerReadDocHandler(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			req := &mcp.CallToolRequest{}
-			input := internal.ReadInput{Path: tt.path, Source: tt.source}
+			input := tools.ReadInput{Path: tt.path, Source: tt.source}
 
 			result, output, err := srv.handleReadDoc(ctx, req, input)
 			if tt.wantErr {
@@ -271,7 +271,7 @@ func TestServerReadDocHandler(t *testing.T) {
 			assert.NotNil(t, output)
 
 			// verify output structure
-			readOutput, ok := output.(*internal.ReadOutput)
+			readOutput, ok := output.(*tools.ReadOutput)
 			require.True(t, ok)
 			assert.Equal(t, tt.wantContent, readOutput.Content)
 
@@ -320,7 +320,7 @@ func TestServerListAllDocsHandler(t *testing.T) {
 	assert.NotNil(t, output)
 
 	// verify output structure
-	listOutput, ok := output.(*internal.ListOutput)
+	listOutput, ok := output.(*tools.ListOutput)
 	require.True(t, ok)
 	assert.Len(t, listOutput.Docs, 3)
 	assert.Equal(t, 3, listOutput.Total)

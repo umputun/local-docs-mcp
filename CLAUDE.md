@@ -10,24 +10,24 @@ Go implementation of Model Context Protocol (MCP) server providing Claude with a
 
 ### Package Responsibilities
 
-#### cmd/local-docs-mcp
+#### app (main)
 - entry point and initialization
 - logging setup
 - server lifecycle management
 - stdio transport configuration
 
-#### internal/server
+#### app/server
 - MCP server creation and configuration
 - tool registration with official SDK
 - server startup and shutdown
 
-#### internal/tools
+#### app/tools
 - tool implementations (search_docs, read_doc, list_all_docs)
 - input/output type definitions
 - fuzzy matching logic
 - business logic isolated from MCP protocol
 
-#### internal/scanner
+#### app/scanner
 - file discovery across sources (commands, project-docs, project-root)
 - safe path resolution preventing traversal
 - file metadata collection (size, source)

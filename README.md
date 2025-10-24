@@ -27,7 +27,7 @@ Download the latest release from the [releases page](https://github.com/umputun/
 ### Using Go
 
 ```bash
-go install github.com/umputun/local-docs-mcp/cmd/local-docs-mcp@latest
+go install github.com/umputun/local-docs-mcp/app@latest
 ```
 
 ### Using Homebrew (macOS)

@@ -1,4 +1,4 @@
-package internal
+package tools
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 
 	"github.com/sahilm/fuzzy"
 
-	"github.com/umputun/local-docs-mcp/internal/scanner"
+	"github.com/umputun/local-docs-mcp/app/scanner"
 )
 
 const (

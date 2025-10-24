@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/umputun/local-docs-mcp/internal"
-	"github.com/umputun/local-docs-mcp/internal/scanner"
+	"github.com/umputun/local-docs-mcp/app/scanner"
+	"github.com/umputun/local-docs-mcp/app/tools"
 )
 
 // Config defines server configuration
@@ -65,10 +65,10 @@ func New(config Config) (*Server, error) {
 	if config.EnableCache {
 		cached, err := scanner.NewCachedScanner(baseScanner, config.CacheTTL)
 		if err != nil {
-			log.Printf("[WARN] failed to create cached scanner, using regular scanner: %v", err)
+			slog.Warn("failed to create cached scanner, using regular scanner", "error", err)
 		} else {
 			sc = cached
-			log.Printf("[INFO] file list caching enabled with TTL=%v", config.CacheTTL)
+			slog.Info("file list caching enabled", "ttl", config.CacheTTL)
 		}
 	}
 
@@ -112,10 +112,10 @@ func (s *Server) registerTools() {
 }
 
 // handleSearchDocs handles search_docs tool calls
-func (s *Server) handleSearchDocs(ctx context.Context, _ *mcp.CallToolRequest, input internal.SearchInput) (*mcp.CallToolResult, any, error) {
-	log.Printf("[DEBUG] search_docs called with query: %s", input.Query)
+func (s *Server) handleSearchDocs(ctx context.Context, _ *mcp.CallToolRequest, input tools.SearchInput) (*mcp.CallToolResult, any, error) {
+	slog.Debug("search_docs called", "query", input.Query)
 
-	result, err := internal.SearchDocs(ctx, s.scanner, input.Query)
+	result, err := tools.SearchDocs(ctx, s.scanner, input.Query)
 	if err != nil {
 		return nil, nil, fmt.Errorf("search failed: %w", err)
 	}
@@ -136,10 +136,10 @@ func (s *Server) handleSearchDocs(ctx context.Context, _ *mcp.CallToolRequest, i
 }
 
 // handleReadDoc handles read_doc tool calls
-func (s *Server) handleReadDoc(ctx context.Context, _ *mcp.CallToolRequest, input internal.ReadInput) (*mcp.CallToolResult, any, error) {
-	log.Printf("[DEBUG] read_doc called with path: %s, source: %v", input.Path, input.Source)
+func (s *Server) handleReadDoc(ctx context.Context, _ *mcp.CallToolRequest, input tools.ReadInput) (*mcp.CallToolResult, any, error) {
+	slog.Debug("read_doc called", "path", input.Path, "source", input.Source)
 
-	result, err := internal.ReadDoc(ctx, s.scanner, input.Path, input.Source, s.config.MaxFileSize)
+	result, err := tools.ReadDoc(ctx, s.scanner, input.Path, input.Source, s.config.MaxFileSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read failed: %w", err)
 	}
@@ -162,9 +162,9 @@ func (s *Server) handleReadDoc(ctx context.Context, _ *mcp.CallToolRequest, inpu
 // handleListAllDocs handles list_all_docs tool calls.
 // input is required by MCP SDK signature but list_all_docs takes no parameters.
 func (s *Server) handleListAllDocs(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-	log.Printf("[DEBUG] list_all_docs called")
+	slog.Debug("list_all_docs called")
 
-	result, err := internal.ListAllDocs(ctx, s.scanner, s.config.MaxFileSize)
+	result, err := tools.ListAllDocs(ctx, s.scanner, s.config.MaxFileSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list failed: %w", err)
 	}
@@ -186,9 +186,8 @@ func (s *Server) handleListAllDocs(ctx context.Context, _ *mcp.CallToolRequest, 
 
 // Run starts the MCP server with stdio transport
 func (s *Server) Run(ctx context.Context) error {
-	log.Printf("[INFO] starting MCP server: %s v%s", s.config.ServerName, s.config.Version)
-	log.Printf("[INFO] scanning sources: commands=%s, docs=%s, root=%s",
-		s.config.CommandsDir, s.config.ProjectDocsDir, s.config.ProjectRootDir)
+	slog.Info("starting MCP server", "name", s.config.ServerName, "version", s.config.Version)
+	slog.Info("scanning sources", "commands", s.config.CommandsDir, "docs", s.config.ProjectDocsDir, "root", s.config.ProjectRootDir)
 
 	// ensure cleanup on exit
 	defer s.Close()

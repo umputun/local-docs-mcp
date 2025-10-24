@@ -1,4 +1,4 @@
-package internal
+package tools
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/umputun/local-docs-mcp/internal/scanner"
+	"github.com/umputun/local-docs-mcp/app/scanner"
 )
 
 func TestSearchDocs(t *testing.T) {

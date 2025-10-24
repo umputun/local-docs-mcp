@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -14,7 +14,7 @@ import (
 
 	"github.com/jessevdk/go-flags"
 
-	"github.com/umputun/local-docs-mcp/internal/server"
+	"github.com/umputun/local-docs-mcp/app/server"
 )
 
 var revision = "unknown"
@@ -34,15 +34,25 @@ type Options struct {
 }
 
 func main() {
-	if err := run(); err != nil {
-		log.Fatalf("[ERROR] %v", err)
-	}
+	os.Exit(realMain())
 }
 
-func run() error {
-	// setup logging
-	log.SetFlags(log.LstdFlags)
-	log.SetPrefix("[local-docs-mcp] ")
+func realMain() int {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+	if err := run(ctx); err != nil {
+		slog.Error("fatal error", "error", err)
+		return 1
+	}
+	return 0
+}
+
+func run(ctx context.Context) error {
+	// setup logging with text handler
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+	slog.SetDefault(slog.New(handler))
 
 	// parse command line options
 	var opts Options
@@ -94,26 +104,12 @@ func run() error {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
 
-	// setup context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// handle signals for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		<-sigChan
-		log.Printf("[INFO] shutdown signal received")
-		cancel()
-	}()
-
 	// run server
 	if err := srv.Run(ctx); err != nil {
 		return fmt.Errorf("server error: %w", err)
 	}
 
-	log.Printf("[INFO] server stopped")
+	slog.Info("server stopped")
 	return nil
 }
 

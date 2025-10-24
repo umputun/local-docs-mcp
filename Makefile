@@ -10,12 +10,12 @@ all: test build
 
 .PHONY: build
 build: ## build binary
-	cd cmd/local-docs-mcp && go build -mod=vendor -ldflags "-X main.revision=$(REV) -s -w" -o ../../.bin/local-docs-mcp.$(BRANCH)
+	cd app && go build -mod=vendor -ldflags "-X main.revision=$(REV) -s -w" -o ../.bin/local-docs-mcp.$(BRANCH)
 	cp .bin/local-docs-mcp.$(BRANCH) .bin/local-docs-mcp
 
 .PHONY: install
 install: ## install binary to GOPATH/bin
-	go install -mod=vendor -ldflags "-X main.revision=$(REV) -s -w" ./cmd/local-docs-mcp
+	go install -mod=vendor -ldflags "-X main.revision=$(REV) -s -w" ./app
 
 .PHONY: test
 test: ## run tests with race detector
@@ -57,7 +57,7 @@ deps: ## download dependencies
 
 .PHONY: run
 run: ## run the server
-	go run -mod=vendor ./cmd/local-docs-mcp
+	go run -mod=vendor ./app
 
 .PHONY: bench
 bench: ## run benchmarks

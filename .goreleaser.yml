@@ -4,7 +4,7 @@ dist: .bin
 builds:
   - id: local-docs-mcp
     binary: "local-docs-mcp"
-    main: ./cmd/local-docs-mcp
+    main: ./app
     flags:
       - -mod=vendor
     env:
