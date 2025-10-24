@@ -41,7 +41,8 @@ lint: ## run linter
 
 .PHONY: fmt
 fmt: ## format code
-	~/.dot-files/claude/format.sh
+	gofmt -s -w $$(find . -type f -name "*.go" -not -path "./vendor/*")
+	goimports -w $$(find . -type f -name "*.go" -not -path "./vendor/*")
 
 .PHONY: clean
 clean: ## remove build artifacts
