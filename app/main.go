@@ -19,51 +19,52 @@ import (
 
 var revision = "unknown"
 
-const (
-	maxFileSize = 5 * 1024 * 1024 // 5MB
-)
-
 // Options defines command line options
 type Options struct {
 	SharedDocsDir  string        `long:"shared-docs-dir" env:"SHARED_DOCS_DIR" default:"~/.claude/commands" description:"shared documentation directory"`
 	ProjectDocsDir string        `long:"docs-dir" env:"DOCS_DIR" default:"docs" description:"project docs directory"`
 	EnableRootDocs bool          `long:"enable-root-docs" env:"ENABLE_ROOT_DOCS" description:"enable scanning root *.md files"`
 	ExcludeDirs    []string      `long:"exclude-dir" env:"EXCLUDE_DIRS" env-delim:"," default:"plans" description:"directories to exclude from docs scan"`
-	EnableCache    bool          `long:"enable-cache" env:"ENABLE_CACHE" description:"enable file list caching with automatic invalidation"`
 	CacheTTL       time.Duration `long:"cache-ttl" env:"CACHE_TTL" default:"1h" description:"cache TTL (time-to-live) for file list"`
+	MaxFileSize    int64         `long:"max-file-size" env:"MAX_FILE_SIZE" default:"5242880" description:"maximum file size in bytes to index"`
+	Debug          bool          `long:"dbg" env:"DEBUG" description:"enable debug logging"`
 }
 
 func main() {
-	os.Exit(realMain())
-}
-
-func realMain() int {
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
-	if err := run(ctx); err != nil {
-		slog.Error("fatal error", "error", err)
-		return 1
-	}
-	return 0
-}
-
-func run(ctx context.Context) error {
-	// setup logging with text handler
-	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})
-	slog.SetDefault(slog.New(handler))
-
-	// parse command line options
 	var opts Options
 	if _, err := flags.Parse(&opts); err != nil {
 		var flagsErr *flags.Error
 		if errors.As(err, &flagsErr) && flagsErr.Type == flags.ErrHelp {
-			return nil
+			os.Exit(0)
 		}
-		return fmt.Errorf("failed to parse flags: %w", err)
+		fmt.Fprintf(os.Stderr, "failed to parse flags: %v\n", err)
+		os.Exit(1)
 	}
 
+	// setup logging with text handler
+	level := slog.LevelInfo
+	if opts.Debug {
+		level = slog.LevelDebug
+	}
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
+	slog.SetDefault(slog.New(handler))
+
+	slog.Info("starting local-docs MCP server", "version", revision)
+
+	// use embedded function to properly handle defer before os.Exit
+	os.Exit(func() int {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+		defer cancel()
+
+		if err := run(ctx, opts); err != nil {
+			slog.Error("fatal error", "error", err)
+			return 1
+		}
+		return 0
+	}())
+}
+
+func run(ctx context.Context, opts Options) error {
 	// expand ~ in shared docs dir
 	sharedDocsDir, err := expandTilde(opts.SharedDocsDir)
 	if err != nil {
@@ -91,10 +92,9 @@ func run(ctx context.Context) error {
 		ProjectDocsDir: projectDocsDir,
 		ProjectRootDir: projectRootDir,
 		ExcludeDirs:    opts.ExcludeDirs,
-		MaxFileSize:    maxFileSize,
+		MaxFileSize:    opts.MaxFileSize,
 		ServerName:     "local-docs",
 		Version:        revision,
-		EnableCache:    opts.EnableCache,
 		CacheTTL:       opts.CacheTTL,
 	}
 

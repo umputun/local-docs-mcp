@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
@@ -406,54 +407,27 @@ func TestServer_Close(t *testing.T) {
 	commandsDir := filepath.Join(tmpDir, "commands")
 	require.NoError(t, os.MkdirAll(commandsDir, 0755))
 
-	tests := []struct {
-		name        string
-		config      Config
-		enableCache bool
-	}{
-		{
-			name: "close server with regular scanner",
-			config: Config{
-				CommandsDir:    commandsDir,
-				ProjectDocsDir: tmpDir,
-				ProjectRootDir: "",
-				MaxFileSize:    1024 * 1024,
-				ServerName:     "test",
-				Version:        "1.0",
-				EnableCache:    false,
-			},
-			enableCache: false,
-		},
-		{
-			name: "close server with cached scanner",
-			config: Config{
-				CommandsDir:    commandsDir,
-				ProjectDocsDir: tmpDir,
-				ProjectRootDir: "",
-				MaxFileSize:    1024 * 1024,
-				ServerName:     "test",
-				Version:        "1.0",
-				EnableCache:    true,
-			},
-			enableCache: true,
-		},
+	config := Config{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: tmpDir,
+		ProjectRootDir: "",
+		MaxFileSize:    1024 * 1024,
+		ServerName:     "test",
+		Version:        "1.0",
+		CacheTTL:       time.Minute,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			srv, err := New(tt.config)
-			require.NoError(t, err)
-			require.NotNil(t, srv)
+	srv, err := New(config)
+	require.NoError(t, err)
+	require.NotNil(t, srv)
 
-			// close server
-			err = srv.Close()
-			assert.NoError(t, err)
+	// close server
+	err = srv.Close()
+	assert.NoError(t, err)
 
-			// close should be idempotent
-			err = srv.Close()
-			assert.NoError(t, err)
-		})
-	}
+	// close should be idempotent
+	err = srv.Close()
+	assert.NoError(t, err)
 }
 
 func TestServer_Close_NilScanner(t *testing.T) {

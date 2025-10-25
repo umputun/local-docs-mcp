@@ -25,7 +25,6 @@ type Config struct {
 	MaxFileSize    int64
 	ServerName     string
 	Version        string
-	EnableCache    bool
 	CacheTTL       time.Duration
 }
 
@@ -40,10 +39,19 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// fileScanner defines what the server needs from a scanner
+type fileScanner interface {
+	Scan(ctx context.Context) ([]scanner.FileInfo, error)
+	CommandsDir() string
+	ProjectDocsDir() string
+	ProjectRootDir() string
+	Close() error
+}
+
 // Server represents the MCP server instance
 type Server struct {
 	config  Config
-	scanner scanner.Interface
+	scanner fileScanner
 	mcp     *mcp.Server
 }
 
@@ -63,17 +71,12 @@ func New(config Config) (*Server, error) {
 		ExcludeDirs:    config.ExcludeDirs,
 	})
 
-	// wrap with caching if enabled
-	var sc scanner.Interface = baseScanner
-	if config.EnableCache {
-		cached, err := scanner.NewCachedScanner(baseScanner, config.CacheTTL)
-		if err != nil {
-			slog.Warn("failed to create cached scanner, using regular scanner", "error", err)
-		} else {
-			sc = cached
-			slog.Info("file list caching enabled", "ttl", config.CacheTTL)
-		}
+	// wrap with caching (always enabled)
+	sc, err := scanner.NewCachedScanner(baseScanner, config.CacheTTL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cached scanner: %w", err)
 	}
+	slog.Info("file list caching enabled", "ttl", config.CacheTTL)
 
 	// create MCP server
 	mcpServer := mcp.NewServer(&mcp.Implementation{

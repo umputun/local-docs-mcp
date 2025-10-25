@@ -189,11 +189,10 @@ func TestIntegration_ServerWithCache(t *testing.T) {
 		Version: "1.0.0",
 	}, nil)
 
-	// create command to run server with caching enabled
+	// create command to run server (caching is always enabled)
 	cmd := exec.Command(
 		binaryPath,
 		"--shared-docs-dir="+sharedDocsDir,
-		"--enable-cache",
 		"--cache-ttl=1m",
 	)
 	transport := &mcp.CommandTransport{Command: cmd}
