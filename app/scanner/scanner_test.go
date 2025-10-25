@@ -454,3 +454,39 @@ func TestScanner_shouldExcludeDir(t *testing.T) {
 		})
 	}
 }
+
+func TestScanner_Close(t *testing.T) {
+	// test that Close is a no-op and always returns nil
+	tmpDir := t.TempDir()
+	scanner := NewScanner(Params{
+		CommandsDir:    tmpDir,
+		ProjectDocsDir: tmpDir,
+		ProjectRootDir: tmpDir,
+		MaxFileSize:    1024,
+	})
+
+	// close should succeed
+	err := scanner.Close()
+	assert.NoError(t, err)
+
+	// close should be idempotent
+	err = scanner.Close()
+	assert.NoError(t, err)
+}
+
+func TestScanner_DirectoryGetters(t *testing.T) {
+	commandsDir := "/commands"
+	docsDir := "/docs"
+	rootDir := "/root"
+
+	scanner := NewScanner(Params{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: docsDir,
+		ProjectRootDir: rootDir,
+		MaxFileSize:    1024,
+	})
+
+	assert.Equal(t, commandsDir, scanner.CommandsDir())
+	assert.Equal(t, docsDir, scanner.ProjectDocsDir())
+	assert.Equal(t, rootDir, scanner.ProjectRootDir())
+}

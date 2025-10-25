@@ -373,3 +373,25 @@ func BenchmarkCachedScanner_ScanCacheHit(b *testing.B) {
 		}
 	}
 }
+
+func TestCachedScanner_DirectoryGetters(t *testing.T) {
+	commandsDir := "/commands"
+	docsDir := "/docs"
+	rootDir := "/root"
+
+	base := NewScanner(Params{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: docsDir,
+		ProjectRootDir: rootDir,
+		MaxFileSize:    1024,
+	})
+
+	cached, err := NewCachedScanner(base, 5*time.Minute)
+	require.NoError(t, err)
+	defer cached.Close()
+
+	// verify directory getters delegate to wrapped scanner
+	assert.Equal(t, commandsDir, cached.CommandsDir())
+	assert.Equal(t, docsDir, cached.ProjectDocsDir())
+	assert.Equal(t, rootDir, cached.ProjectRootDir())
+}
