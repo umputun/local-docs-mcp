@@ -812,3 +812,299 @@ func TestServer_ListAllDocs_ContextCancellation(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
+
+func TestServer_CalculateScore(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	config := Config{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: tmpDir,
+		ProjectRootDir: "",
+		MaxFileSize:    1024 * 1024,
+		ServerName:     "test-server",
+		Version:        "1.0.0",
+	}
+
+	srv, err := New(config)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name           string
+		query          string
+		normalizedName string
+		wantScore      float64
+		checkFunc      func(t *testing.T, score float64)
+	}{
+		{
+			name:           "exact match",
+			query:          "test",
+			normalizedName: "test",
+			wantScore:      1.0,
+		},
+		{
+			name:           "exact match with .md extension",
+			query:          "test",
+			normalizedName: "test.md",
+			wantScore:      1.0,
+		},
+		{
+			name:           "exact match already has .md",
+			query:          "test.md",
+			normalizedName: "test.md",
+			wantScore:      1.0,
+		},
+		{
+			name:           "substring match - half the name",
+			query:          "test",
+			normalizedName: "test-command",
+			checkFunc: func(t *testing.T, score float64) {
+				// score should be 0.8 * (4/12) = 0.267
+				assert.Greater(t, score, 0.0)
+				assert.Less(t, score, 1.0)
+				assert.Greater(t, score, 0.2)
+				assert.Less(t, score, 0.3)
+			},
+		},
+		{
+			name:           "substring match - most of the name",
+			query:          "architecture",
+			normalizedName: "architecture-guide",
+			checkFunc: func(t *testing.T, score float64) {
+				// score should be 0.8 * (12/18) = 0.533
+				assert.Greater(t, score, 0.5)
+				assert.Less(t, score, 0.6)
+			},
+		},
+		{
+			name:           "substring match - small query in long name",
+			query:          "ab",
+			normalizedName: "abcdefghijklmnop",
+			checkFunc: func(t *testing.T, score float64) {
+				// score should be 0.8 * (2/16) = 0.1
+				assert.Greater(t, score, 0.0)
+				assert.Less(t, score, 0.15)
+			},
+		},
+		{
+			name:           "fuzzy match above threshold",
+			query:          "test",
+			normalizedName: "t-e-s-t",
+			checkFunc: func(t *testing.T, score float64) {
+				// sahilm/fuzzy can match chars in sequence with gaps
+				// score should be > 0 and scaled down (< exact/substring)
+				assert.Greater(t, score, 0.0)
+				assert.Less(t, score, 0.7)
+				assert.Greater(t, score, 0.4) // should be ~0.469 (67/100 * 0.7)
+			},
+		},
+		{
+			name:           "fuzzy match below threshold - weak subsequence",
+			query:          "tst",
+			normalizedName: "test",
+			wantScore:      0.0, // score too low, below 0.3 threshold
+		},
+		{
+			name:           "no fuzzy match - chars out of order",
+			query:          "tset",
+			normalizedName: "test",
+			wantScore:      0.0, // sahilm/fuzzy can't match transpositions
+		},
+		{
+			name:           "no match - completely different",
+			query:          "xyz",
+			normalizedName: "abc",
+			wantScore:      0.0,
+		},
+		{
+			name:           "no match - very different strings",
+			query:          "architecture",
+			normalizedName: "zzzzzz",
+			wantScore:      0.0,
+		},
+		{
+			name:           "case sensitivity already normalized",
+			query:          "test",
+			normalizedName: "test",
+			wantScore:      1.0,
+		},
+		{
+			name:           "empty query",
+			query:          "",
+			normalizedName: "test",
+			wantScore:      0.0,
+		},
+		{
+			name:           "empty normalized name",
+			query:          "test",
+			normalizedName: "",
+			wantScore:      0.0,
+		},
+		{
+			name:           "both empty",
+			query:          "",
+			normalizedName: "",
+			wantScore:      1.0, // empty == empty
+		},
+		{
+			name:           "substring at end",
+			query:          "file",
+			normalizedName: "test-file",
+			checkFunc: func(t *testing.T, score float64) {
+				assert.Greater(t, score, 0.0)
+				assert.Less(t, score, 1.0)
+			},
+		},
+		{
+			name:           "substring at start",
+			query:          "test",
+			normalizedName: "test-file",
+			checkFunc: func(t *testing.T, score float64) {
+				assert.Greater(t, score, 0.0)
+				assert.Less(t, score, 1.0)
+			},
+		},
+		{
+			name:           "substring in middle",
+			query:          "mid",
+			normalizedName: "start-mid-end",
+			checkFunc: func(t *testing.T, score float64) {
+				assert.Greater(t, score, 0.0)
+				assert.Less(t, score, 1.0)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score := srv.calculateScore(tt.query, tt.normalizedName)
+
+			if tt.checkFunc != nil {
+				tt.checkFunc(t, score)
+			} else {
+				assert.Equal(t, tt.wantScore, score)
+			}
+		})
+	}
+}
+
+func TestServer_CalculateScore_FuzzyThreshold(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	config := Config{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: tmpDir,
+		ProjectRootDir: "",
+		MaxFileSize:    1024 * 1024,
+		ServerName:     "test-server",
+		Version:        "1.0.0",
+	}
+
+	srv, err := New(config)
+	require.NoError(t, err)
+
+	// test cases that should be below fuzzy threshold and return 0
+	tests := []struct {
+		name           string
+		query          string
+		normalizedName string
+	}{
+		{
+			name:           "very poor fuzzy match",
+			query:          "abcdefgh",
+			normalizedName: "zyxwvuts",
+		},
+		{
+			name:           "single char query no match",
+			query:          "x",
+			normalizedName: "test",
+		},
+		{
+			name:           "completely unrelated",
+			query:          "documentation",
+			normalizedName: "zzzzz",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score := srv.calculateScore(tt.query, tt.normalizedName)
+			assert.Equal(t, 0.0, score, "poor fuzzy matches should be below threshold")
+		})
+	}
+}
+
+func TestServer_CalculateScore_FuzzyMatching(t *testing.T) {
+	// tests fuzzy matching behavior with sahilm/fuzzy library
+	// note: this library does subsequence matching (chars in order with gaps)
+	// not true fuzzy matching (transpositions, insertions, deletions)
+
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	config := Config{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: tmpDir,
+		ProjectRootDir: "",
+		MaxFileSize:    1024 * 1024,
+		ServerName:     "test-server",
+		Version:        "1.0.0",
+	}
+
+	srv, err := New(config)
+	require.NoError(t, err)
+
+	// cases caught by substring before reaching fuzzy
+	substringCaught := []struct {
+		query string
+		name  string
+	}{
+		{"doc", "docs"},   // doc is substring of docs
+		{"test", "ttest"}, // test is substring of ttest
+		{"git", "gitt"},   // git is substring of gitt
+	}
+
+	for _, tt := range substringCaught {
+		score := srv.calculateScore(tt.query, tt.name)
+		// these all match via substring, not fuzzy
+		assert.Greater(t, score, 0.0, "should match via substring")
+		assert.LessOrEqual(t, score, 0.8, "substring matches score <= 0.8")
+	}
+
+	// successful fuzzy matches (not exact, not substring)
+	fuzzyMatches := []struct {
+		query string
+		name  string
+	}{
+		{"test", "t-e-s-t"},          // chars with separators
+		{"cmd", "c-o-m-m-a-n-d"},     // subsequence with gaps
+		{"git", "g-i-t-c-o-m-m-i-t"}, // prefix subsequence
+		{"comit", "commit"},          // missing char (still valid subsequence)
+	}
+
+	for _, tt := range fuzzyMatches {
+		score := srv.calculateScore(tt.query, tt.name)
+		assert.Greater(t, score, 0.0, "fuzzy match should score > 0")
+		assert.Less(t, score, 0.8, "fuzzy matches score < substring matches")
+	}
+
+	// sahilm/fuzzy limitations - cannot match these
+	noFuzzyMatch := []struct {
+		query  string
+		name   string
+		reason string
+	}{
+		{"tset", "test", "chars out of order (transposition)"},
+		{"tst", "test", "weak subsequence below threshold"},
+		{"xyz", "abc", "no common chars"},
+	}
+
+	for _, tt := range noFuzzyMatch {
+		score := srv.calculateScore(tt.query, tt.name)
+		assert.Equal(t, 0.0, score, "should not match: %s", tt.reason)
+	}
+}

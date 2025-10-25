@@ -223,9 +223,11 @@ func (s *Server) calculateScore(query, normalizedName string) float64 {
 	matches := fuzzy.Find(query, []string{normalizedName})
 	if len(matches) > 0 && matches[0].Score > 0 {
 		// normalize fuzzy score to 0-1 range
-		// fuzzy.Find returns lower scores for better matches
-		// we want higher scores for better matches
-		fuzzyScore := 1.0 / (1.0 + float64(matches[0].Score))
+		// sahilm/fuzzy returns higher scores for better matches (up to ~100 for perfect match)
+		fuzzyScore := float64(matches[0].Score) / 100.0
+		if fuzzyScore > 1.0 {
+			fuzzyScore = 1.0
+		}
 
 		// only accept if above threshold
 		if fuzzyScore >= fuzzyThreshold {
