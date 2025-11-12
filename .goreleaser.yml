@@ -1,12 +1,8 @@
-version: 2
 project_name: local-docs-mcp
 dist: .bin
 builds:
   - id: local-docs-mcp
     binary: "local-docs-mcp"
-    main: ./app
-    flags:
-      - -mod=vendor
     env:
       - CGO_ENABLED=0
     goos:
@@ -26,30 +22,32 @@ builds:
         goarch: arm
       - goos: windows
         goarch: arm64
+    dir: app
     ldflags: "-s -w -X main.revision={{.Tag}}-{{.ShortCommit}}-{{.CommitDate}}"
 
 archives:
   - id: local-docs-mcp
     name_template: >-
-      {{.ProjectName}}_
-      {{- .Tag}}_
-      {{- if eq .Os "darwin"}}macos
-      {{- else if eq .Os "windows"}}win
-      {{- else}}{{.Os}}{{end}}_
-      {{- if eq .Arch "amd64"}}x86_64
-      {{- else if eq .Arch "386"}}i386
-      {{- else}}{{.Arch}}{{end}}
+     {{.ProjectName}}_
+     {{- .Tag}}_
+     {{- if eq .Os "darwin"}}macos
+     {{- else if eq .Os "windows"}}win
+     {{- else}}{{.Os}}{{end}}_
+     {{- if eq .Arch "amd64"}}x86_64
+     {{- else if eq .Arch "386"}}i386
+     {{- else}}{{.Arch}}{{end}}
+    format_overrides:
+      - goos: windows
+        format: zip
     files:
       - LICENSE
       - README.md
-    formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
+    rlcp: true
 
 brews:
-  - name: local-docs-mcp
-    repository:
+  -
+    name: local-docs-mcp
+    tap:
       owner: umputun
       name: homebrew-apps
       branch: master
@@ -60,6 +58,7 @@ brews:
     homepage: "https://github.com/umputun/local-docs-mcp"
     description: "MCP server for local documentation access"
     license: "MIT"
+
 
 nfpms:
   - id: local-docs-mcp
