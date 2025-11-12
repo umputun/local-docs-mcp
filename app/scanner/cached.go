@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,11 +15,10 @@ import (
 )
 
 const (
-	cacheKey         = "file_list"
-	defaultCacheTTL  = 1 * time.Hour
-	defaultDebounce  = 500 * time.Millisecond
-	watchBufferSize  = 100
-	invalidateBuffer = 10
+	cacheKey        = "file_list"
+	defaultCacheTTL = 1 * time.Hour
+	defaultDebounce = 500 * time.Millisecond
+	watchBufferSize = 100
 )
 
 // CachedScanner wraps Scanner with caching and file watching capabilities
@@ -27,7 +27,6 @@ type CachedScanner struct {
 	cache         cache.Cache[string, []FileInfo]
 	watcher       *fsnotify.Watcher
 	stopCh        chan struct{}
-	invalidateCh  chan struct{}
 	mu            sync.RWMutex
 	ttl           time.Duration
 	debounce      time.Duration
@@ -41,18 +40,16 @@ func NewCachedScanner(scanner *Scanner, ttl time.Duration) (*CachedScanner, erro
 	}
 
 	cs := &CachedScanner{
-		scanner:      scanner,
-		cache:        cache.NewCache[string, []FileInfo]().WithTTL(ttl),
-		stopCh:       make(chan struct{}),
-		invalidateCh: make(chan struct{}, invalidateBuffer),
-		ttl:          ttl,
-		debounce:     defaultDebounce,
+		scanner:  scanner,
+		cache:    cache.NewCache[string, []FileInfo]().WithTTL(ttl),
+		stopCh:   make(chan struct{}),
+		ttl:      ttl,
+		debounce: defaultDebounce,
 	}
 
 	// attempt to start watcher, but don't fail if it doesn't work
 	if err := cs.startWatcher(context.Background()); err != nil {
-		// log error but continue without watching
-		// scanner will work, just without automatic cache invalidation
+		slog.Warn("failed to start file watcher, cache will not auto-invalidate", "error", err)
 		return cs, nil
 	}
 
@@ -153,26 +150,26 @@ func (cs *CachedScanner) startWatcher(ctx context.Context) error {
 
 // addWatchRecursive adds directory and subdirectories to watcher
 func (cs *CachedScanner) addWatchRecursive(dir string) error {
-	return filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error { // nolint:wrapcheck // filepath.Walk error is descriptive
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error { // nolint:wrapcheck // filepath.WalkDir error is descriptive
 		if err != nil {
 			return nil // skip errors
 		}
 
 		// skip hidden directories
 		if filepath.Base(path) != "" && strings.HasPrefix(filepath.Base(path), ".") {
-			if info.IsDir() {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
 		// skip excluded directories
-		if info.IsDir() && cs.scanner.shouldExcludeDir(filepath.Base(path)) {
+		if d.IsDir() && cs.scanner.shouldExcludeDir(filepath.Base(path)) {
 			return filepath.SkipDir
 		}
 
 		// add directory to watcher (watch directories only)
-		if info.IsDir() {
+		if d.IsDir() {
 			if err := cs.watcher.Add(path); err != nil {
 				return nil // skip if can't add
 			}
@@ -186,6 +183,16 @@ func (cs *CachedScanner) addWatchRecursive(dir string) error {
 func (cs *CachedScanner) watchLoop(ctx context.Context) {
 	debounceTimer := time.NewTimer(cs.debounce)
 	debounceTimer.Stop() // stop initial timer
+
+	// ensure timer is stopped and drained on exit
+	defer func() {
+		debounceTimer.Stop()
+		// drain timer channel to prevent leak
+		select {
+		case <-debounceTimer.C:
+		default:
+		}
+	}()
 
 	for {
 		select {
@@ -213,8 +220,7 @@ func (cs *CachedScanner) watchLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			// log error but continue watching
-			_ = err
+			slog.Warn("file watcher error", "error", err)
 		}
 	}
 }

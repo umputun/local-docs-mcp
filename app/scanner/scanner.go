@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -224,6 +225,7 @@ func (s *Scanner) scanRecursive(ctx context.Context, source Source, dir string) 
 		}
 
 		if err != nil {
+			slog.Debug("skipping path due to walk error", "path", path, "error", err)
 			return nil // skip errors
 		}
 
@@ -244,11 +246,13 @@ func (s *Scanner) scanRecursive(ctx context.Context, source Source, dir string) 
 		if !d.IsDir() && strings.HasSuffix(d.Name(), ".md") {
 			info, err := d.Info()
 			if err != nil {
+				slog.Debug("skipping file, cannot stat", "path", path, "error", err)
 				return nil // skip files we can't stat
 			}
 
 			relPath, err := filepath.Rel(dir, path)
 			if err != nil {
+				slog.Debug("skipping file, cannot get relative path", "path", path, "error", err)
 				return nil
 			}
 
@@ -303,6 +307,7 @@ func (s *Scanner) scanFlat(ctx context.Context, source Source, dir string) ([]Fi
 			path := filepath.Join(dir, entry.Name())
 			info, err := entry.Info()
 			if err != nil {
+				slog.Debug("skipping file, cannot stat", "path", path, "error", err)
 				continue // skip files we can't stat
 			}
 

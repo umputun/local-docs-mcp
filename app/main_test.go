@@ -285,3 +285,76 @@ func TestExpandTilde(t *testing.T) {
 		})
 	}
 }
+
+func TestRun(t *testing.T) {
+	// subtest 1: invalid config (doesn't start server, always works)
+	t.Run("invalid config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// change to tmpDir for test
+		oldDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer os.Chdir(oldDir)
+
+		// create options with invalid config (zero max file size)
+		opts := Options{
+			SharedDocsDir:  tmpDir,
+			ProjectDocsDir: "docs",
+			MaxFileSize:    0, // invalid - must be > 0
+			CacheTTL:       1 * time.Hour,
+			ExcludeDirs:    []string{"plans"},
+		}
+
+		ctx := context.Background()
+
+		// run should return error due to invalid config
+		err = run(ctx, opts)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create server")
+	})
+
+	t.Run("success with cancelled context", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sharedDocsDir := filepath.Join(tmpDir, "shared")
+
+		// create directory
+		require.NoError(t, os.MkdirAll(sharedDocsDir, 0755))
+
+		// change to tmpDir for test
+		oldDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer os.Chdir(oldDir)
+
+		// redirect stdout to avoid "write /dev/stdout: file already closed" error during coverage
+		oldStdout := os.Stdout
+		devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		require.NoError(t, err)
+		os.Stdout = devNull
+		defer func() {
+			devNull.Close()
+			os.Stdout = oldStdout
+		}()
+
+		// create options
+		opts := Options{
+			SharedDocsDir:  sharedDocsDir,
+			ProjectDocsDir: "docs",
+			MaxFileSize:    1024 * 1024,
+			CacheTTL:       1 * time.Hour,
+			ExcludeDirs:    []string{"plans"},
+		}
+
+		// use pre-cancelled context so server exits immediately
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		// run with cancelled context
+		err = run(ctx, opts)
+		// should handle cancellation gracefully
+		if err != nil {
+			assert.Contains(t, err.Error(), "context canceled")
+		}
+	})
+}

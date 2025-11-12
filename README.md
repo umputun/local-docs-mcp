@@ -6,7 +6,7 @@ Implementation of the Model Context Protocol (MCP) server for local documentatio
 
 - **Multi-source documentation**: Access docs from commands, project docs, and project root
 - **Smart search**: Fuzzy matching with exact/substring match priority
-- **Optional caching**: File list caching with automatic invalidation on changes (~3000x faster)
+- **Always-on caching**: File list caching with automatic invalidation on changes (~3000x faster)
 - **File watching**: Automatic cache invalidation when documentation files change
 - **Safe path handling**: Prevents directory traversal and validates paths
 - **Source prefixes**: Explicitly specify documentation source (e.g., `commands:file.md`)
@@ -97,22 +97,23 @@ Available options:
 - `--docs-dir` - project docs directory (default: `docs`)
 - `--enable-root-docs` - scan root-level `*.md` files (default: disabled)
 - `--exclude-dir` - directories to exclude from project docs scan (default: `plans`)
-- `--enable-cache` - enable file list caching
 - `--cache-ttl` - cache time-to-live (default: `1h`)
+- `--max-file-size` - maximum file size in bytes to index (default: `5242880` - 5MB)
+- `--dbg` - enable debug logging
 
-### Caching (Optional)
+### Caching
 
-Enable file list caching for significantly faster repeated queries:
+File list caching is always enabled for significantly faster repeated queries. The cache TTL can be configured:
 
 ```bash
-# enable with 1h TTL (default)
-local-docs-mcp --enable-cache
+# use default 1h TTL
+local-docs-mcp
 
 # custom TTL
-local-docs-mcp --enable-cache --cache-ttl=30m
+local-docs-mcp --cache-ttl=30m
 
-# via environment variables
-ENABLE_CACHE=true CACHE_TTL=2h local-docs-mcp
+# via environment variable
+CACHE_TTL=2h local-docs-mcp
 ```
 
 **Performance**: Cache hits are ~3,000x faster than filesystem scans (66 nanoseconds vs 201 microseconds). The cache automatically invalidates when documentation files change, ensuring fresh data.

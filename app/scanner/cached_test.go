@@ -235,8 +235,14 @@ func TestCachedScanner_Integration(t *testing.T) {
 	// modify file - should trigger invalidation
 	require.NoError(t, os.WriteFile(testFile, []byte("modified"), 0600))
 
-	// give watcher time to process event and debounce
-	time.Sleep(1 * time.Second)
+	// wait for watcher to process event and debounce using assert.Eventually
+	// polls condition every 100ms for up to 2 seconds
+	assert.Eventually(t, func() bool {
+		// check if cache was invalidated by attempting rescan
+		// invalidation happens when cache.Get returns false
+		_, ok := cached.cache.Get(cacheKey)
+		return !ok // cache should be invalidated
+	}, 2*time.Second, 100*time.Millisecond, "cache should be invalidated after file change")
 
 	// scan should see modification (new rescan)
 	files, err = cached.Scan(ctx)
@@ -394,4 +400,193 @@ func TestCachedScanner_DirectoryGetters(t *testing.T) {
 	assert.Equal(t, commandsDir, cached.CommandsDir())
 	assert.Equal(t, docsDir, cached.ProjectDocsDir())
 	assert.Equal(t, rootDir, cached.ProjectRootDir())
+}
+
+func TestCachedScanner_ConcurrentScans(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	// create test files
+	for i := 0; i < 10; i++ {
+		filename := filepath.Join(commandsDir, fmt.Sprintf("test-%d.md", i))
+		require.NoError(t, os.WriteFile(filename, []byte("test"), 0600))
+	}
+
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
+	cached, err := NewCachedScanner(scanner, 1*time.Hour)
+	require.NoError(t, err)
+	defer cached.Close()
+
+	ctx := context.Background()
+
+	// populate cache
+	_, err = cached.Scan(ctx)
+	require.NoError(t, err)
+
+	// run concurrent scans
+	const numGoroutines = 10
+	results := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			files, err := cached.Scan(ctx)
+			if err != nil {
+				results <- err
+				return
+			}
+			if len(files) != 10 {
+				results <- fmt.Errorf("expected 10 files, got %d", len(files))
+				return
+			}
+			results <- nil
+		}()
+	}
+
+	// collect results
+	for i := 0; i < numGoroutines; i++ {
+		err := <-results
+		assert.NoError(t, err)
+	}
+}
+
+func TestCachedScanner_InvalidateDuringScan(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	// create test files
+	for i := 0; i < 5; i++ {
+		filename := filepath.Join(commandsDir, fmt.Sprintf("test-%d.md", i))
+		require.NoError(t, os.WriteFile(filename, []byte("test"), 0600))
+	}
+
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
+	cached, err := NewCachedScanner(scanner, 1*time.Hour)
+	require.NoError(t, err)
+	defer cached.Close()
+
+	ctx := context.Background()
+
+	// populate cache
+	files1, err := cached.Scan(ctx)
+	require.NoError(t, err)
+	require.Len(t, files1, 5)
+
+	// run scans and invalidations concurrently
+	const numIterations = 20
+	results := make(chan error, numIterations*2)
+
+	// scanner goroutines
+	for i := 0; i < numIterations; i++ {
+		go func() {
+			_, err := cached.Scan(ctx)
+			results <- err
+		}()
+	}
+
+	// invalidator goroutines
+	for i := 0; i < numIterations; i++ {
+		go func() {
+			cached.invalidate()
+			results <- nil
+		}()
+	}
+
+	// collect results
+	for i := 0; i < numIterations*2; i++ {
+		err := <-results
+		assert.NoError(t, err)
+	}
+}
+
+func TestCachedScanner_CloseWhileScanning(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	// create test files
+	for i := 0; i < 10; i++ {
+		filename := filepath.Join(commandsDir, fmt.Sprintf("test-%d.md", i))
+		require.NoError(t, os.WriteFile(filename, []byte("test"), 0600))
+	}
+
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
+	cached, err := NewCachedScanner(scanner, 1*time.Hour)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// start concurrent scans
+	const numGoroutines = 5
+	results := make(chan error, numGoroutines)
+	started := make(chan struct{}, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			started <- struct{}{} // signal that goroutine has started
+			for j := 0; j < 10; j++ {
+				_, err := cached.Scan(ctx)
+				if err != nil {
+					results <- err
+					return
+				}
+			}
+			results <- nil
+		}()
+	}
+
+	// wait for all goroutines to start scanning
+	for i := 0; i < numGoroutines; i++ {
+		<-started
+	}
+
+	// close scanner while scans are happening
+	err = cached.Close()
+	assert.NoError(t, err)
+
+	// collect results - some may succeed, but none should panic or race
+	for i := 0; i < numGoroutines; i++ {
+		<-results // just drain, errors are ok here
+	}
+}
+
+func TestCachedScanner_RapidFileChanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping debounce test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	testFile := filepath.Join(commandsDir, "test.md")
+	require.NoError(t, os.WriteFile(testFile, []byte("initial"), 0600))
+
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
+	cached, err := NewCachedScanner(scanner, 1*time.Hour)
+	require.NoError(t, err)
+	defer cached.Close()
+
+	ctx := context.Background()
+
+	// populate cache
+	files, err := cached.Scan(ctx)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	// make rapid file changes (should trigger debouncing)
+	for i := 0; i < 10; i++ {
+		require.NoError(t, os.WriteFile(testFile, []byte(fmt.Sprintf("change %d", i)), 0600))
+		time.Sleep(50 * time.Millisecond) // rapid changes faster than debounce
+	}
+
+	// wait for debounce to settle
+	time.Sleep(600 * time.Millisecond)
+
+	// cache should have been invalidated only once (or few times), not 10 times
+	// scan should still work correctly
+	files, err = cached.Scan(ctx)
+	require.NoError(t, err)
+	assert.Len(t, files, 1, "should still see file after debounced changes")
 }
