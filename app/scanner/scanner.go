@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"fmt"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -21,71 +20,6 @@ const (
 	// SourceProjectRoot represents root-level markdown files
 	SourceProjectRoot Source = "project-root"
 )
-
-// SafeResolvePath resolves a user-provided path relative to baseDir with security checks.
-// It prevents path traversal, validates file existence and size, and adds .md extension if missing.
-func SafeResolvePath(baseDir, userPath string, maxSize int64) (string, error) {
-	// reject empty path
-	if userPath == "" {
-		return "", fmt.Errorf("empty path provided")
-	}
-
-	// reject absolute paths
-	if filepath.IsAbs(userPath) {
-		return "", fmt.Errorf("absolute paths not allowed: %s", userPath)
-	}
-
-	// add .md extension if missing
-	if !strings.HasSuffix(userPath, ".md") {
-		userPath += ".md"
-	}
-
-	// clean the path to normalize it
-	userPath = filepath.Clean(userPath)
-
-	// check for path traversal attempts
-	if strings.Contains(userPath, "..") {
-		return "", fmt.Errorf("path traversal not allowed: %s", userPath)
-	}
-
-	// resolve to absolute path
-	absPath := filepath.Join(baseDir, userPath)
-
-	// verify the resolved path is still within baseDir
-	cleanBase := filepath.Clean(baseDir)
-	cleanPath := filepath.Clean(absPath)
-
-	relPath, err := filepath.Rel(cleanBase, cleanPath)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		return "", fmt.Errorf("path traversal not allowed: resolved path outside base directory")
-	}
-
-	// check file exists
-	info, err := os.Stat(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("file not found: %s", userPath)
-		}
-		return "", fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	// check file size
-	if info.Size() > maxSize {
-		return "", fmt.Errorf("file too large: %d bytes (max %d)", info.Size(), maxSize)
-	}
-
-	return absPath, nil
-}
-
-// FileInfo contains metadata about a documentation file
-type FileInfo struct {
-	Name       string // original filename
-	Filename   string // filename with source prefix (e.g., "commands:action/commit.md")
-	Normalized string // lowercase for matching
-	Source     Source // source type
-	Path       string // absolute path
-	Size       int64  // file size in bytes
-}
 
 // Params contains parameters for creating a scanner
 type Params struct {
@@ -135,11 +69,17 @@ func (s *Scanner) ProjectRootDir() string {
 func (s *Scanner) Scan(ctx context.Context) ([]FileInfo, error) {
 	var results []FileInfo
 
-	// check context before starting
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
-	default:
+	isCtxCanceled := func() error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
+		default:
+			return nil
+		}
+	}
+
+	if err := isCtxCanceled(); err != nil {
+		return nil, err
 	}
 
 	// scan commands directory recursively
@@ -154,10 +94,8 @@ func (s *Scanner) Scan(ctx context.Context) ([]FileInfo, error) {
 	}
 
 	// check context between scans
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
-	default:
+	if ctxErr := isCtxCanceled(); ctxErr != nil {
+		return nil, ctxErr
 	}
 
 	// scan project docs (with configurable exclusions)
@@ -171,10 +109,8 @@ func (s *Scanner) Scan(ctx context.Context) ([]FileInfo, error) {
 	}
 
 	// check context between scans
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err() // nolint:wrapcheck // context errors should be returned as-is
-	default:
+	if ctxErr := isCtxCanceled(); ctxErr != nil {
+		return nil, ctxErr
 	}
 
 	// scan project root (only .md files in root, not subdirectories)
