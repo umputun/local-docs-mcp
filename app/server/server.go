@@ -138,11 +138,13 @@ type ReadOutput struct {
 
 // DocInfo represents information about a documentation file
 type DocInfo struct {
-	Name     string `json:"name"`
-	Filename string `json:"filename"`
-	Source   string `json:"source"`
-	Size     int64  `json:"size,omitempty"`
-	TooLarge bool   `json:"too_large,omitempty"`
+	Name        string   `json:"name"`
+	Filename    string   `json:"filename"`
+	Source      string   `json:"source"`
+	Size        int64    `json:"size,omitempty"`
+	TooLarge    bool     `json:"too_large,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 // ListOutput contains the result of listing all documentation files
@@ -166,9 +168,9 @@ func (s *Server) searchDocs(ctx context.Context, query string) (*SearchOutput, e
 		return nil, err // nolint:wrapcheck // scanner error is descriptive
 	}
 
-	// normalize query (lowercase, replace spaces with hyphens)
+	// normalize query for filename matching (lowercase, replace spaces with hyphens)
 	normalizedQuery := strings.ToLower(query)
-	normalizedQuery = strings.ReplaceAll(normalizedQuery, " ", "-")
+	filenameQuery := strings.ReplaceAll(normalizedQuery, " ", "-")
 
 	var matches []SearchMatch
 
@@ -181,7 +183,7 @@ func (s *Server) searchDocs(ctx context.Context, query string) (*SearchOutput, e
 		default:
 		}
 
-		score := s.calculateScore(normalizedQuery, f.Normalized)
+		score := s.calculateScore(filenameQuery, normalizedQuery, f)
 		if score > 0 {
 			matches = append(matches, SearchMatch{
 				Path:   f.Filename,
@@ -210,35 +212,67 @@ func (s *Server) searchDocs(ctx context.Context, query string) (*SearchOutput, e
 }
 
 // calculateScore computes match score for a file
-func (s *Server) calculateScore(query, normalizedName string) float64 {
-	// exact match (case insensitive)
-	if normalizedName == query || normalizedName == query+".md" {
-		return 1.0
+// filenameQuery is normalized with hyphens for filename matching
+// frontmatterQuery preserves spaces for frontmatter matching
+func (s *Server) calculateScore(filenameQuery, frontmatterQuery string, file scanner.FileInfo) float64 {
+	var score float64
+
+	normalizedName := file.Normalized
+
+	// check for exact match
+	if normalizedName == filenameQuery || normalizedName == filenameQuery+".md" {
+		return s.applyFrontmatterBoost(1.0, frontmatterQuery, file)
 	}
 
-	// substring match
-	if strings.Contains(normalizedName, query) {
-		// score based on how much of the name is the query
-		return 0.8 * (float64(len(query)) / float64(len(normalizedName)))
+	// check for substring match
+	if strings.Contains(normalizedName, filenameQuery) {
+		score = 0.8 * (float64(len(filenameQuery)) / float64(len(normalizedName)))
+		return s.applyFrontmatterBoost(score, frontmatterQuery, file)
 	}
 
-	// fuzzy match
-	matches := fuzzy.Find(query, []string{normalizedName})
+	// try fuzzy match on filename
+	matches := fuzzy.Find(filenameQuery, []string{normalizedName})
 	if len(matches) > 0 && matches[0].Score > 0 {
-		// normalize fuzzy score to 0-1 range
-		// sahilm/fuzzy returns higher scores for better matches (up to ~100 for perfect match)
 		fuzzyScore := float64(matches[0].Score) / 100.0
 		if fuzzyScore > 1.0 {
 			fuzzyScore = 1.0
 		}
-
-		// only accept if above threshold
 		if fuzzyScore >= fuzzyThreshold {
-			return fuzzyScore * 0.7 // scale down fuzzy matches
+			score = fuzzyScore * 0.7
 		}
 	}
 
-	return 0
+	return s.applyFrontmatterBoost(score, frontmatterQuery, file)
+}
+
+// applyFrontmatterBoost adds score boost based on frontmatter matches.
+// Maximum boost from frontmatter is capped at 1.0 to prevent files with extensive
+// metadata from completely dominating search results.
+func (s *Server) applyFrontmatterBoost(score float64, query string, file scanner.FileInfo) float64 {
+	var boost float64
+
+	// boost score based on frontmatter matches
+	normalizedDesc := strings.ToLower(file.Description)
+	if normalizedDesc != "" && strings.Contains(normalizedDesc, query) {
+		boost += 0.5 // boost for description match
+	}
+
+	// boost for tag matches
+	for _, tag := range file.Tags {
+		normalizedTag := strings.ToLower(tag)
+		if normalizedTag == query {
+			boost += 0.3 // exact tag match
+		} else if strings.Contains(normalizedTag, query) {
+			boost += 0.15 // partial tag match
+		}
+	}
+
+	// cap total frontmatter boost at 1.0
+	if boost > 1.0 {
+		boost = 1.0
+	}
+
+	return score + boost
 }
 
 // readDoc reads a specific documentation file
@@ -300,10 +334,13 @@ func (s *Server) readDoc(ctx context.Context, path string, source *string) (*Rea
 			return nil, fmt.Errorf("failed to read file: %w", err)
 		}
 
+		// strip frontmatter from content
+		_, strippedContent := scanner.ParseFrontmatter(content)
+
 		return &ReadOutput{
 			Path:    cleanPath,
-			Content: string(content),
-			Size:    len(content),
+			Content: string(strippedContent),
+			Size:    len(strippedContent),
 			Source:  string(actualSource),
 		}, nil
 	}
@@ -338,10 +375,13 @@ func (s *Server) readDoc(ctx context.Context, path string, source *string) (*Rea
 			continue // try next source
 		}
 
+		// strip frontmatter from content
+		_, strippedContent := scanner.ParseFrontmatter(content)
+
 		return &ReadOutput{
 			Path:    cleanPath,
-			Content: string(content),
-			Size:    len(content),
+			Content: string(strippedContent),
+			Size:    len(strippedContent),
 			Source:  string(src.src),
 		}, nil
 	}
@@ -366,10 +406,12 @@ func (s *Server) listAllDocs(ctx context.Context) (*ListOutput, error) {
 		}
 
 		doc := DocInfo{
-			Name:     f.Name,
-			Filename: f.Filename,
-			Source:   string(f.Source),
-			Size:     f.Size,
+			Name:        f.Name,
+			Filename:    f.Filename,
+			Source:      string(f.Source),
+			Size:        f.Size,
+			Description: f.Description,
+			Tags:        f.Tags,
 		}
 
 		// mark files that exceed max size

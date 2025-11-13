@@ -2,6 +2,8 @@ package scanner
 
 import (
 	"context"
+	"errors"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -192,13 +194,18 @@ func (s *Scanner) scanRecursive(ctx context.Context, source Source, dir string) 
 				return nil
 			}
 
+			// extract frontmatter
+			description, tags := extractFrontmatter(path)
+
 			fileInfo := FileInfo{
-				Name:       filepath.Base(path),
-				Filename:   string(source) + ":" + filepath.ToSlash(relPath),
-				Normalized: strings.ToLower(filepath.Base(path)),
-				Source:     source,
-				Path:       path,
-				Size:       info.Size(),
+				Name:        filepath.Base(path),
+				Filename:    string(source) + ":" + filepath.ToSlash(relPath),
+				Normalized:  strings.ToLower(filepath.Base(path)),
+				Source:      source,
+				Path:        path,
+				Size:        info.Size(),
+				Description: description,
+				Tags:        tags,
 			}
 			results = append(results, fileInfo)
 		}
@@ -247,13 +254,18 @@ func (s *Scanner) scanFlat(ctx context.Context, source Source, dir string) ([]Fi
 				continue // skip files we can't stat
 			}
 
+			// extract frontmatter
+			description, tags := extractFrontmatter(path)
+
 			fileInfo := FileInfo{
-				Name:       entry.Name(),
-				Filename:   string(source) + ":" + entry.Name(),
-				Normalized: strings.ToLower(entry.Name()),
-				Source:     source,
-				Path:       path,
-				Size:       info.Size(),
+				Name:        entry.Name(),
+				Filename:    string(source) + ":" + entry.Name(),
+				Normalized:  strings.ToLower(entry.Name()),
+				Source:      source,
+				Path:        path,
+				Size:        info.Size(),
+				Description: description,
+				Tags:        tags,
 			}
 			results = append(results, fileInfo)
 		}
@@ -265,6 +277,27 @@ func (s *Scanner) scanFlat(ctx context.Context, source Source, dir string) ([]Fi
 // Close is a no-op for Scanner but required to implement Interface
 func (s *Scanner) Close() error {
 	return nil
+}
+
+// extractFrontmatter reads frontmatter from a file (max 2KB header read)
+func extractFrontmatter(path string) (description string, tags []string) {
+	// #nosec G304 - path is from scanner, not user input
+	f, err := os.Open(path)
+	if err != nil {
+		return "", nil // can't read, return empty
+	}
+	defer f.Close()
+
+	// read first 2KB (enough for frontmatter)
+	buf := make([]byte, 2048)
+	n, err := f.Read(buf)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", nil // read error, return empty
+	}
+
+	// parse frontmatter (ParseFrontmatter returns empty metadata on parse errors)
+	fm, _ := ParseFrontmatter(buf[:n])
+	return fm.Description, fm.Tags
 }
 
 // shouldExcludeDir checks if directory should be excluded based on excludeDirs list

@@ -490,3 +490,183 @@ func TestScanner_DirectoryGetters(t *testing.T) {
 	assert.Equal(t, docsDir, scanner.ProjectDocsDir())
 	assert.Equal(t, rootDir, scanner.ProjectRootDir())
 }
+
+func TestScanner_FrontmatterExtraction(t *testing.T) {
+	testdataDir := filepath.Join("testdata")
+
+	scanner := NewScanner(Params{
+		ProjectRootDir: testdataDir,
+		MaxFileSize:    1024 * 1024,
+	})
+
+	files, err := scanner.scanFlat(context.Background(), SourceProjectRoot, testdataDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+
+	// create map for easy lookup
+	fileMap := make(map[string]FileInfo)
+	for _, f := range files {
+		fileMap[f.Name] = f
+	}
+
+	// verify full frontmatter with array tags
+	fullArray := fileMap["full-frontmatter-array.md"]
+	assert.Equal(t, "Full frontmatter with array tags", fullArray.Description)
+	assert.Equal(t, []string{"testing", "sample", "documentation"}, fullArray.Tags)
+
+	// verify full frontmatter with comma-separated tags
+	fullComma := fileMap["full-frontmatter-comma.md"]
+	assert.Equal(t, "Full frontmatter with comma-separated tags", fullComma.Description)
+	assert.Equal(t, []string{"testing", "sample", "documentation"}, fullComma.Tags)
+
+	// verify description only
+	descOnly := fileMap["description-only.md"]
+	assert.Equal(t, "Only description, no tags", descOnly.Description)
+	assert.Empty(t, descOnly.Tags)
+
+	// verify tags only
+	tagsOnly := fileMap["tags-only.md"]
+	assert.Empty(t, tagsOnly.Description)
+	assert.Equal(t, []string{"tag1", "tag2", "tag3"}, tagsOnly.Tags)
+
+	// verify no frontmatter
+	noFM := fileMap["no-frontmatter.md"]
+	assert.Empty(t, noFM.Description)
+	assert.Empty(t, noFM.Tags)
+
+	// verify empty frontmatter
+	emptyFM := fileMap["empty-frontmatter.md"]
+	assert.Empty(t, emptyFM.Description)
+	assert.Empty(t, emptyFM.Tags)
+
+	// verify multiline description
+	multiline := fileMap["multiline-description.md"]
+	assert.Contains(t, multiline.Description, "multiline description")
+	assert.Equal(t, []string{"multiline", "test"}, multiline.Tags)
+}
+
+func TestExtractFrontmatter(t *testing.T) {
+	testdataDir := filepath.Join("testdata")
+
+	tests := []struct {
+		name     string
+		file     string
+		wantDesc string
+		wantTags []string
+	}{
+		{
+			name:     "full frontmatter array",
+			file:     "full-frontmatter-array.md",
+			wantDesc: "Full frontmatter with array tags",
+			wantTags: []string{"testing", "sample", "documentation"},
+		},
+		{
+			name:     "full frontmatter comma",
+			file:     "full-frontmatter-comma.md",
+			wantDesc: "Full frontmatter with comma-separated tags",
+			wantTags: []string{"testing", "sample", "documentation"},
+		},
+		{
+			name:     "description only",
+			file:     "description-only.md",
+			wantDesc: "Only description, no tags",
+			wantTags: nil,
+		},
+		{
+			name:     "tags only",
+			file:     "tags-only.md",
+			wantDesc: "",
+			wantTags: []string{"tag1", "tag2", "tag3"},
+		},
+		{
+			name:     "no frontmatter",
+			file:     "no-frontmatter.md",
+			wantDesc: "",
+			wantTags: nil,
+		},
+		{
+			name:     "empty frontmatter",
+			file:     "empty-frontmatter.md",
+			wantDesc: "",
+			wantTags: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(testdataDir, tt.file)
+			desc, tags := extractFrontmatter(path)
+			assert.Equal(t, tt.wantDesc, desc)
+			assert.Equal(t, tt.wantTags, tags)
+		})
+	}
+}
+
+func TestExtractFrontmatter_2KBTruncation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// create file with frontmatter exceeding 2KB
+	largeFrontmatter := "---\n"
+	largeFrontmatter += "description: " + strings.Repeat("a", 3000) + "\n"
+	largeFrontmatter += "tags: [test]\n"
+	largeFrontmatter += "---\n"
+	largeFrontmatter += "# Content"
+
+	filePath := filepath.Join(tmpDir, "large-fm.md")
+	require.NoError(t, os.WriteFile(filePath, []byte(largeFrontmatter), 0600))
+
+	// extractFrontmatter should handle truncation gracefully
+	desc, tags := extractFrontmatter(filePath)
+
+	// with 3KB description, the frontmatter block is truncated at 2KB
+	// YAML parsing should fail, resulting in empty metadata
+	assert.Empty(t, desc, "description should be empty due to truncation")
+	assert.Empty(t, tags, "tags should be empty due to truncation")
+}
+
+func TestExtractFrontmatter_MalformedYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name: "invalid YAML syntax",
+			content: `---
+description: missing quote "
+tags: [test
+---
+# Content`,
+		},
+		{
+			name: "unclosed frontmatter",
+			content: `---
+description: test
+tags: [test]
+# Content without closing ---`,
+		},
+		{
+			name: "broken YAML indentation",
+			content: `---
+description: test
+  tags: [broken]
+---
+# Content`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filePath := filepath.Join(tmpDir, "malformed-"+tt.name+".md")
+			require.NoError(t, os.WriteFile(filePath, []byte(tt.content), 0600))
+
+			// should handle malformed frontmatter gracefully
+			desc, tags := extractFrontmatter(filePath)
+
+			// malformed frontmatter should result in empty metadata (not panic)
+			assert.Empty(t, desc, "description should be empty for malformed YAML")
+			assert.Empty(t, tags, "tags should be empty for malformed YAML")
+		})
+	}
+}

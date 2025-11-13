@@ -9,12 +9,14 @@ import (
 
 // FileInfo contains metadata about a documentation file
 type FileInfo struct {
-	Name       string // original filename
-	Filename   string // filename with source prefix (e.g., "commands:action/commit.md")
-	Normalized string // lowercase for matching
-	Source     Source // source type
-	Path       string // absolute path
-	Size       int64  // file size in bytes
+	Name        string   // original filename
+	Filename    string   // filename with source prefix (e.g., "commands:action/commit.md")
+	Normalized  string   // lowercase for matching
+	Source      Source   // source type
+	Path        string   // absolute path
+	Size        int64    // file size in bytes
+	Description string   // description from frontmatter (if present)
+	Tags        []string // tags from frontmatter (if present)
 }
 
 // SafeResolvePath resolves a user-provided path relative to baseDir with security checks.

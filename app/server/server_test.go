@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/umputun/local-docs-mcp/app/scanner"
 )
 
 func TestNew(t *testing.T) {
@@ -805,34 +808,34 @@ func TestServer_CalculateScore(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name           string
-		query          string
-		normalizedName string
-		wantScore      float64
-		checkFunc      func(t *testing.T, score float64)
+		name      string
+		query     string
+		file      scanner.FileInfo
+		wantScore float64
+		checkFunc func(t *testing.T, score float64)
 	}{
 		{
-			name:           "exact match",
-			query:          "test",
-			normalizedName: "test",
-			wantScore:      1.0,
+			name:      "exact match",
+			query:     "test",
+			file:      scanner.FileInfo{Normalized: "test"},
+			wantScore: 1.0,
 		},
 		{
-			name:           "exact match with .md extension",
-			query:          "test",
-			normalizedName: "test.md",
-			wantScore:      1.0,
+			name:      "exact match with .md extension",
+			query:     "test",
+			file:      scanner.FileInfo{Normalized: "test.md"},
+			wantScore: 1.0,
 		},
 		{
-			name:           "exact match already has .md",
-			query:          "test.md",
-			normalizedName: "test.md",
-			wantScore:      1.0,
+			name:      "exact match already has .md",
+			query:     "test.md",
+			file:      scanner.FileInfo{Normalized: "test.md"},
+			wantScore: 1.0,
 		},
 		{
-			name:           "substring match - half the name",
-			query:          "test",
-			normalizedName: "test-command",
+			name:  "substring match - half the name",
+			query: "test",
+			file:  scanner.FileInfo{Normalized: "test-command"},
 			checkFunc: func(t *testing.T, score float64) {
 				// score should be 0.8 * (4/12) = 0.267
 				assert.Greater(t, score, 0.0)
@@ -842,9 +845,9 @@ func TestServer_CalculateScore(t *testing.T) {
 			},
 		},
 		{
-			name:           "substring match - most of the name",
-			query:          "architecture",
-			normalizedName: "architecture-guide",
+			name:  "substring match - most of the name",
+			query: "architecture",
+			file:  scanner.FileInfo{Normalized: "architecture-guide"},
 			checkFunc: func(t *testing.T, score float64) {
 				// score should be 0.8 * (12/18) = 0.533
 				assert.Greater(t, score, 0.5)
@@ -852,9 +855,9 @@ func TestServer_CalculateScore(t *testing.T) {
 			},
 		},
 		{
-			name:           "substring match - small query in long name",
-			query:          "ab",
-			normalizedName: "abcdefghijklmnop",
+			name:  "substring match - small query in long name",
+			query: "ab",
+			file:  scanner.FileInfo{Normalized: "abcdefghijklmnop"},
 			checkFunc: func(t *testing.T, score float64) {
 				// score should be 0.8 * (2/16) = 0.1
 				assert.Greater(t, score, 0.0)
@@ -862,9 +865,9 @@ func TestServer_CalculateScore(t *testing.T) {
 			},
 		},
 		{
-			name:           "fuzzy match above threshold",
-			query:          "test",
-			normalizedName: "t-e-s-t",
+			name:  "fuzzy match above threshold",
+			query: "test",
+			file:  scanner.FileInfo{Normalized: "t-e-s-t"},
 			checkFunc: func(t *testing.T, score float64) {
 				// sahilm/fuzzy can match chars in sequence with gaps
 				// score should be > 0 and scaled down (< exact/substring)
@@ -874,75 +877,75 @@ func TestServer_CalculateScore(t *testing.T) {
 			},
 		},
 		{
-			name:           "fuzzy match below threshold - weak subsequence",
-			query:          "tst",
-			normalizedName: "test",
-			wantScore:      0.0, // score too low, below 0.3 threshold
+			name:      "fuzzy match below threshold - weak subsequence",
+			query:     "tst",
+			file:      scanner.FileInfo{Normalized: "test"},
+			wantScore: 0.0, // score too low, below 0.3 threshold
 		},
 		{
-			name:           "no fuzzy match - chars out of order",
-			query:          "tset",
-			normalizedName: "test",
-			wantScore:      0.0, // sahilm/fuzzy can't match transpositions
+			name:      "no fuzzy match - chars out of order",
+			query:     "tset",
+			file:      scanner.FileInfo{Normalized: "test"},
+			wantScore: 0.0, // sahilm/fuzzy can't match transpositions
 		},
 		{
-			name:           "no match - completely different",
-			query:          "xyz",
-			normalizedName: "abc",
-			wantScore:      0.0,
+			name:      "no match - completely different",
+			query:     "xyz",
+			file:      scanner.FileInfo{Normalized: "abc"},
+			wantScore: 0.0,
 		},
 		{
-			name:           "no match - very different strings",
-			query:          "architecture",
-			normalizedName: "zzzzzz",
-			wantScore:      0.0,
+			name:      "no match - very different strings",
+			query:     "architecture",
+			file:      scanner.FileInfo{Normalized: "zzzzzz"},
+			wantScore: 0.0,
 		},
 		{
-			name:           "case sensitivity already normalized",
-			query:          "test",
-			normalizedName: "test",
-			wantScore:      1.0,
+			name:      "case sensitivity already normalized",
+			query:     "test",
+			file:      scanner.FileInfo{Normalized: "test"},
+			wantScore: 1.0,
 		},
 		{
-			name:           "empty query",
-			query:          "",
-			normalizedName: "test",
-			wantScore:      0.0,
+			name:      "empty query",
+			query:     "",
+			file:      scanner.FileInfo{Normalized: "test"},
+			wantScore: 0.0,
 		},
 		{
-			name:           "empty normalized name",
-			query:          "test",
-			normalizedName: "",
-			wantScore:      0.0,
+			name:      "empty normalized name",
+			query:     "test",
+			file:      scanner.FileInfo{Normalized: ""},
+			wantScore: 0.0,
 		},
 		{
-			name:           "both empty",
-			query:          "",
-			normalizedName: "",
-			wantScore:      1.0, // empty == empty
+			name:      "both empty",
+			query:     "",
+			file:      scanner.FileInfo{Normalized: ""},
+			wantScore: 1.0, // empty == empty
 		},
 		{
-			name:           "substring at end",
-			query:          "file",
-			normalizedName: "test-file",
+			name:  "substring at end",
+			query: "file",
+			file:  scanner.FileInfo{Normalized: "test-file"},
 			checkFunc: func(t *testing.T, score float64) {
 				assert.Greater(t, score, 0.0)
 				assert.Less(t, score, 1.0)
 			},
 		},
 		{
-			name:           "substring at start",
-			query:          "test",
-			normalizedName: "test-file",
+			name:  "substring at start",
+			query: "test",
+			file:  scanner.FileInfo{Normalized: "test-file"},
 			checkFunc: func(t *testing.T, score float64) {
 				assert.Greater(t, score, 0.0)
 				assert.Less(t, score, 1.0)
 			},
 		},
 		{
-			name:           "substring in middle",
-			query:          "mid",
-			normalizedName: "start-mid-end",
+			name:  "substring in middle",
+			query: "mid",
+			file:  scanner.FileInfo{Normalized: "start-mid-end"},
 			checkFunc: func(t *testing.T, score float64) {
 				assert.Greater(t, score, 0.0)
 				assert.Less(t, score, 1.0)
@@ -952,7 +955,8 @@ func TestServer_CalculateScore(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			score := srv.calculateScore(tt.query, tt.normalizedName)
+			// for these tests, query has no spaces, so both params are the same
+			score := srv.calculateScore(tt.query, tt.query, tt.file)
 
 			if tt.checkFunc != nil {
 				tt.checkFunc(t, score)
@@ -982,30 +986,31 @@ func TestServer_CalculateScore_FuzzyThreshold(t *testing.T) {
 
 	// test cases that should be below fuzzy threshold and return 0
 	tests := []struct {
-		name           string
-		query          string
-		normalizedName string
+		name  string
+		query string
+		file  scanner.FileInfo
 	}{
 		{
-			name:           "very poor fuzzy match",
-			query:          "abcdefgh",
-			normalizedName: "zyxwvuts",
+			name:  "very poor fuzzy match",
+			query: "abcdefgh",
+			file:  scanner.FileInfo{Normalized: "zyxwvuts"},
 		},
 		{
-			name:           "single char query no match",
-			query:          "x",
-			normalizedName: "test",
+			name:  "single char query no match",
+			query: "x",
+			file:  scanner.FileInfo{Normalized: "test"},
 		},
 		{
-			name:           "completely unrelated",
-			query:          "documentation",
-			normalizedName: "zzzzz",
+			name:  "completely unrelated",
+			query: "documentation",
+			file:  scanner.FileInfo{Normalized: "zzzzz"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			score := srv.calculateScore(tt.query, tt.normalizedName)
+			// for these tests, query has no spaces, so both params are the same
+			score := srv.calculateScore(tt.query, tt.query, tt.file)
 			assert.Equal(t, 0.0, score, "poor fuzzy matches should be below threshold")
 		})
 	}
@@ -1035,15 +1040,16 @@ func TestServer_CalculateScore_FuzzyMatching(t *testing.T) {
 	// cases caught by substring before reaching fuzzy
 	substringCaught := []struct {
 		query string
-		name  string
+		file  scanner.FileInfo
 	}{
-		{"doc", "docs"},   // doc is substring of docs
-		{"test", "ttest"}, // test is substring of ttest
-		{"git", "gitt"},   // git is substring of gitt
+		{"doc", scanner.FileInfo{Normalized: "docs"}},   // doc is substring of docs
+		{"test", scanner.FileInfo{Normalized: "ttest"}}, // test is substring of ttest
+		{"git", scanner.FileInfo{Normalized: "gitt"}},   // git is substring of gitt
 	}
 
 	for _, tt := range substringCaught {
-		score := srv.calculateScore(tt.query, tt.name)
+		// for these tests, query has no spaces, so both params are the same
+		score := srv.calculateScore(tt.query, tt.query, tt.file)
 		// these all match via substring, not fuzzy
 		assert.Greater(t, score, 0.0, "should match via substring")
 		assert.LessOrEqual(t, score, 0.8, "substring matches score <= 0.8")
@@ -1052,16 +1058,17 @@ func TestServer_CalculateScore_FuzzyMatching(t *testing.T) {
 	// successful fuzzy matches (not exact, not substring)
 	fuzzyMatches := []struct {
 		query string
-		name  string
+		file  scanner.FileInfo
 	}{
-		{"test", "t-e-s-t"},          // chars with separators
-		{"cmd", "c-o-m-m-a-n-d"},     // subsequence with gaps
-		{"git", "g-i-t-c-o-m-m-i-t"}, // prefix subsequence
-		{"comit", "commit"},          // missing char (still valid subsequence)
+		{"test", scanner.FileInfo{Normalized: "t-e-s-t"}},          // chars with separators
+		{"cmd", scanner.FileInfo{Normalized: "c-o-m-m-a-n-d"}},     // subsequence with gaps
+		{"git", scanner.FileInfo{Normalized: "g-i-t-c-o-m-m-i-t"}}, // prefix subsequence
+		{"comit", scanner.FileInfo{Normalized: "commit"}},          // missing char (still valid subsequence)
 	}
 
 	for _, tt := range fuzzyMatches {
-		score := srv.calculateScore(tt.query, tt.name)
+		// for these tests, query has no spaces, so both params are the same
+		score := srv.calculateScore(tt.query, tt.query, tt.file)
 		assert.Greater(t, score, 0.0, "fuzzy match should score > 0")
 		assert.Less(t, score, 0.8, "fuzzy matches score < substring matches")
 	}
@@ -1069,16 +1076,406 @@ func TestServer_CalculateScore_FuzzyMatching(t *testing.T) {
 	// sahilm/fuzzy limitations - cannot match these
 	noFuzzyMatch := []struct {
 		query  string
-		name   string
+		file   scanner.FileInfo
 		reason string
 	}{
-		{"tset", "test", "chars out of order (transposition)"},
-		{"tst", "test", "weak subsequence below threshold"},
-		{"xyz", "abc", "no common chars"},
+		{"tset", scanner.FileInfo{Normalized: "test"}, "chars out of order (transposition)"},
+		{"tst", scanner.FileInfo{Normalized: "test"}, "weak subsequence below threshold"},
+		{"xyz", scanner.FileInfo{Normalized: "abc"}, "no common chars"},
 	}
 
 	for _, tt := range noFuzzyMatch {
-		score := srv.calculateScore(tt.query, tt.name)
+		// for these tests, query has no spaces, so both params are the same
+		score := srv.calculateScore(tt.query, tt.query, tt.file)
 		assert.Equal(t, 0.0, score, "should not match: %s", tt.reason)
 	}
+}
+
+func TestServer_ApplyFrontmatterBoost(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	config := Config{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: tmpDir,
+		ProjectRootDir: "",
+		MaxFileSize:    1024 * 1024,
+		ServerName:     "test-server",
+		Version:        "1.0.0",
+	}
+
+	srv, err := New(config)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name      string
+		baseScore float64
+		query     string
+		file      scanner.FileInfo
+		wantScore float64
+	}{
+		{
+			name:      "description match boosts score",
+			baseScore: 0.5,
+			query:     "testing",
+			file:      scanner.FileInfo{Description: "This is for testing purposes", Tags: nil},
+			wantScore: 1.0, // 0.5 + 0.5
+		},
+		{
+			name:      "exact tag match boosts score",
+			baseScore: 0.5,
+			query:     "golang",
+			file:      scanner.FileInfo{Description: "", Tags: []string{"golang", "tutorial"}},
+			wantScore: 0.8, // 0.5 + 0.3
+		},
+		{
+			name:      "partial tag match boosts score",
+			baseScore: 0.5,
+			query:     "go",
+			file:      scanner.FileInfo{Description: "", Tags: []string{"golang"}},
+			wantScore: 0.65, // 0.5 + 0.15
+		},
+		{
+			name:      "multiple tag matches - exact and partial",
+			baseScore: 0.5,
+			query:     "test",
+			file:      scanner.FileInfo{Description: "", Tags: []string{"test", "testing"}},
+			wantScore: 0.95, // 0.5 + 0.3 (exact) + 0.15 (partial), note: might have float precision
+		},
+		{
+			name:      "description and tag match combined",
+			baseScore: 0.3,
+			query:     "api",
+			file:      scanner.FileInfo{Description: "API documentation guide", Tags: []string{"api", "rest"}},
+			wantScore: 1.1, // 0.3 + 0.5 (desc) + 0.3 (tag)
+		},
+		{
+			name:      "case insensitive description match",
+			baseScore: 0.4,
+			query:     "testing",
+			file:      scanner.FileInfo{Description: "TESTING AND DEVELOPMENT", Tags: nil},
+			wantScore: 0.9, // 0.4 + 0.5
+		},
+		{
+			name:      "case insensitive tag match",
+			baseScore: 0.4,
+			query:     "golang",
+			file:      scanner.FileInfo{Description: "", Tags: []string{"GoLang"}},
+			wantScore: 0.7, // 0.4 + 0.3
+		},
+		{
+			name:      "no boost - no matches",
+			baseScore: 0.6,
+			query:     "test",
+			file:      scanner.FileInfo{Description: "something else", Tags: []string{"other"}},
+			wantScore: 0.6, // no boost
+		},
+		{
+			name:      "no boost - empty frontmatter",
+			baseScore: 0.7,
+			query:     "test",
+			file:      scanner.FileInfo{Description: "", Tags: nil},
+			wantScore: 0.7, // no boost
+		},
+		{
+			name:      "boost capped at 1.0 - excessive metadata",
+			baseScore: 0.5,
+			query:     "test",
+			file:      scanner.FileInfo{Description: "test description", Tags: []string{"test", "testing", "tester", "tested"}},
+			wantScore: 1.5, // 0.5 + 1.0 (capped: would be 0.5 + 0.3 + 0.15*3 = 1.25 without cap)
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score := srv.applyFrontmatterBoost(tt.baseScore, tt.query, tt.file)
+			assert.InDelta(t, tt.wantScore, score, 0.0001, "score should match within precision")
+		})
+	}
+}
+
+func TestServer_CalculateScore_MultiWordQuery(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	config := Config{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: tmpDir,
+		ProjectRootDir: "",
+		MaxFileSize:    1024 * 1024,
+		ServerName:     "test-server",
+		Version:        "1.0.0",
+	}
+
+	srv, err := New(config)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name             string
+		filenameQuery    string
+		frontmatterQuery string
+		file             scanner.FileInfo
+		expectDescBoost  bool
+		expectTagBoost   bool
+		minScore         float64
+	}{
+		{
+			name:             "multi-word query matches description with spaces",
+			filenameQuery:    "test-plan",
+			frontmatterQuery: "test plan",
+			file: scanner.FileInfo{
+				Normalized:  "something-else.md",
+				Description: "comprehensive test plan for the application",
+				Tags:        nil,
+			},
+			expectDescBoost: true,
+			minScore:        0.5, // should get +0.5 boost
+		},
+		{
+			name:             "multi-word query matches tag with spaces",
+			filenameQuery:    "api-documentation",
+			frontmatterQuery: "api documentation",
+			file: scanner.FileInfo{
+				Normalized:  "guide.md",
+				Description: "",
+				Tags:        []string{"api documentation", "rest"},
+			},
+			expectTagBoost: true,
+			minScore:       0.3, // should get +0.3 boost for exact tag match
+		},
+		{
+			name:             "multi-word query partial match in description",
+			filenameQuery:    "test-case",
+			frontmatterQuery: "test case",
+			file: scanner.FileInfo{
+				Normalized:  "doc.md",
+				Description: "writing effective test case scenarios",
+				Tags:        nil,
+			},
+			expectDescBoost: true,
+			minScore:        0.5,
+		},
+		{
+			name:             "hyphenated query matches hyphenated filename but not spaced description",
+			filenameQuery:    "test-plan",
+			frontmatterQuery: "test-plan",
+			file: scanner.FileInfo{
+				Normalized:  "test-plan.md",
+				Description: "test plan documentation", // has spaces, won't match hyphenated query
+				Tags:        nil,
+			},
+			expectDescBoost: false,
+			minScore:        1.0, // exact filename match
+		},
+		{
+			name:             "spaced query matches both filename (hyphenated) and description (spaced)",
+			filenameQuery:    "test-plan",
+			frontmatterQuery: "test plan",
+			file: scanner.FileInfo{
+				Normalized:  "test-plan.md",
+				Description: "test plan documentation",
+				Tags:        []string{"test plan"},
+			},
+			expectDescBoost: true,
+			expectTagBoost:  true,
+			minScore:        1.8, // 1.0 (exact) + 0.5 (desc) + 0.3 (tag)
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score := srv.calculateScore(tt.filenameQuery, tt.frontmatterQuery, tt.file)
+			assert.GreaterOrEqual(t, score, tt.minScore,
+				"score should be at least %f (got %f)", tt.minScore, score)
+
+			if tt.expectDescBoost {
+				assert.Contains(t, strings.ToLower(tt.file.Description), tt.frontmatterQuery,
+					"frontmatterQuery should match description")
+			}
+			if tt.expectTagBoost {
+				matched := false
+				for _, tag := range tt.file.Tags {
+					if strings.Contains(strings.ToLower(tag), tt.frontmatterQuery) {
+						matched = true
+						break
+					}
+				}
+				assert.True(t, matched, "frontmatterQuery should match at least one tag")
+			}
+		})
+	}
+}
+
+func TestServer_ReadDoc_FrontmatterStripping(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	// create file with frontmatter
+	contentWithFrontmatter := `---
+description: Test file with frontmatter
+tags: [test, example]
+---
+
+# Actual Content
+
+This is the real content that should be returned.`
+
+	expectedContent := `
+# Actual Content
+
+This is the real content that should be returned.`
+
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "with-fm.md"),
+		[]byte(contentWithFrontmatter), 0600))
+
+	config := Config{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: tmpDir,
+		ProjectRootDir: "",
+		MaxFileSize:    1024 * 1024,
+		ServerName:     "test-server",
+		Version:        "1.0.0",
+	}
+
+	srv, err := New(config)
+	require.NoError(t, err)
+
+	stringPtr := func(s string) *string { return &s }
+
+	tests := []struct {
+		name   string
+		path   string
+		source *string
+	}{
+		{
+			name:   "with source specified",
+			path:   "with-fm.md",
+			source: stringPtr("commands"),
+		},
+		{
+			name:   "without source (tries all)",
+			path:   "with-fm.md",
+			source: nil,
+		},
+		{
+			name:   "with source prefix in path",
+			path:   "commands:with-fm.md",
+			source: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := srv.readDoc(context.Background(), tt.path, tt.source)
+			require.NoError(t, err)
+			assert.Equal(t, expectedContent, result.Content,
+				"frontmatter should be stripped from content")
+			assert.NotContains(t, result.Content, "---",
+				"content should not contain frontmatter delimiters")
+			assert.NotContains(t, result.Content, "description:",
+				"content should not contain frontmatter fields")
+		})
+	}
+}
+
+func TestServer_ListAllDocs_IncludesFrontmatter(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	// create file with frontmatter
+	contentWithFM := `---
+description: Command for testing purposes
+tags: [testing, development, cli]
+---
+
+# Test Command`
+
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "test-cmd.md"),
+		[]byte(contentWithFM), 0600))
+
+	// create file without frontmatter
+	contentWithoutFM := "# Plain Command"
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "plain.md"),
+		[]byte(contentWithoutFM), 0600))
+
+	config := Config{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: tmpDir,
+		ProjectRootDir: "",
+		MaxFileSize:    1024 * 1024,
+		ServerName:     "test-server",
+		Version:        "1.0.0",
+	}
+
+	srv, err := New(config)
+	require.NoError(t, err)
+
+	result, err := srv.listAllDocs(context.Background())
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(result.Docs), 2, "should have at least 2 files")
+
+	// find file with frontmatter (only check commands source)
+	var docWithFM, docWithoutFM *DocInfo
+	for i := range result.Docs {
+		if result.Docs[i].Name == "test-cmd.md" && result.Docs[i].Source == "commands" {
+			docWithFM = &result.Docs[i]
+		}
+		if result.Docs[i].Name == "plain.md" && result.Docs[i].Source == "commands" {
+			docWithoutFM = &result.Docs[i]
+		}
+	}
+
+	require.NotNil(t, docWithFM, "should find file with frontmatter")
+	assert.Equal(t, "Command for testing purposes", docWithFM.Description)
+	assert.Equal(t, []string{"testing", "development", "cli"}, docWithFM.Tags)
+
+	require.NotNil(t, docWithoutFM, "should find file without frontmatter")
+	assert.Empty(t, docWithoutFM.Description)
+	assert.Empty(t, docWithoutFM.Tags)
+}
+
+func TestServer_SearchDocs_FrontmatterBoostingEndToEnd(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	// create file with frontmatter containing search term
+	contentWithFM := `---
+description: This is about golang programming
+tags: [golang, programming]
+---
+# Some content
+`
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "golang-guide.md"),
+		[]byte(contentWithFM), 0600))
+
+	// create file with search term only in filename
+	contentNoFM := "# Content here"
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "other-file.md"),
+		[]byte(contentNoFM), 0600))
+
+	config := Config{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: tmpDir,
+		ProjectRootDir: "",
+		MaxFileSize:    1024 * 1024,
+		ServerName:     "test-server",
+		Version:        "1.0.0",
+	}
+
+	srv, err := New(config)
+	require.NoError(t, err)
+
+	// search for "golang" - should rank golang-guide.md higher due to frontmatter boost
+	result, err := srv.searchDocs(context.Background(), "golang")
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Results, "should have search results")
+
+	// golang-guide.md should be first due to frontmatter boost
+	assert.Equal(t, "golang-guide.md", result.Results[0].Name, "file with frontmatter match should rank highest")
+	assert.Greater(t, result.Results[0].Score, 1.0, "score should include frontmatter boost")
 }

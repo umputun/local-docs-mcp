@@ -6,6 +6,7 @@ Implementation of the Model Context Protocol (MCP) server for local documentatio
 
 - **Multi-source documentation**: Access docs from commands, project docs, and project root
 - **Smart search**: Fuzzy matching with exact/substring match priority
+- **YAML frontmatter support**: Optional metadata for enhanced search (description, tags)
 - **Always-on caching**: File list caching with automatic invalidation on changes (~3000x faster)
 - **File watching**: Automatic cache invalidation when documentation files change
 - **Safe path handling**: Prevents directory traversal and validates paths
@@ -17,6 +18,32 @@ Implementation of the Model Context Protocol (MCP) server for local documentatio
 1. **Shared Docs** (`~/.claude/commands/**/*.md`): User commands and knowledge bases (configurable)
 2. **Project Docs** (`$CWD/docs/**/*.md`): Project-specific documentation with configurable exclusions
 3. **Project Root** (`$CWD/*.md`): Root-level docs like README.md, CONTRIBUTING.md (opt-in)
+
+### YAML Frontmatter Support
+
+Documentation files can optionally include YAML frontmatter for enhanced searchability:
+
+```markdown
+---
+description: Enforce Test-Driven Development approach for Go code with test-first workflow
+tags: [testing, development, go]
+---
+
+# Your Documentation Content
+```
+
+**Supported fields**:
+- `description`: Text description used to boost search relevance
+- `tags`: Array or comma-separated list of tags for categorization
+
+**Search behavior**:
+- Description matches add +0.5 to search score
+- Exact tag matches add +0.3 to search score
+- Partial tag matches add +0.15 to search score
+- Frontmatter is automatically stripped from `read_doc` output
+- `list_all_docs` includes description and tags in file metadata
+
+**Note**: Frontmatter is completely optional - plain markdown files work perfectly without it.
 
 ## Installation
 
