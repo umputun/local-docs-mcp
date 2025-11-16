@@ -17,7 +17,7 @@ Implementation of the Model Context Protocol (MCP) server for local documentatio
 
 1. **Shared Docs** (`~/.claude/commands/**/*.md`): User commands and knowledge bases (configurable)
 2. **Project Docs** (`$CWD/docs/**/*.md`): Project-specific documentation with configurable exclusions
-3. **Project Root** (`$CWD/*.md`): Root-level docs like README.md, CONTRIBUTING.md (opt-in)
+3. **Project Root** (`$CWD/*.md`): Root-level docs like README.md (opt-in)
 
 ### YAML Frontmatter Support
 
@@ -196,6 +196,3 @@ List all available documentation files from all sources.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.

@@ -16,7 +16,7 @@ github.com/google/jsonschema-go/jsonschema
 github.com/jessevdk/go-flags
 # github.com/kylelemons/godebug v1.1.0
 ## explicit; go 1.11
-# github.com/modelcontextprotocol/go-sdk v1.0.0
+# github.com/modelcontextprotocol/go-sdk v1.1.0
 ## explicit; go 1.23.0
 github.com/modelcontextprotocol/go-sdk/auth
 github.com/modelcontextprotocol/go-sdk/internal/jsonrpc2
@@ -38,8 +38,12 @@ github.com/stretchr/testify/require
 # github.com/yosida95/uritemplate/v3 v3.0.2
 ## explicit; go 1.14
 github.com/yosida95/uritemplate/v3
-# golang.org/x/sys v0.21.0
-## explicit; go 1.18
+# golang.org/x/oauth2 v0.33.0
+## explicit; go 1.24.0
+golang.org/x/oauth2
+golang.org/x/oauth2/internal
+# golang.org/x/sys v0.38.0
+## explicit; go 1.24.0
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 # gopkg.in/yaml.v3 v3.0.1

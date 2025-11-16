@@ -74,7 +74,7 @@ Go implementation of Model Context Protocol (MCP) server providing Claude with a
 
 ### Before Starting Work
 1. check existing tests for patterns
-2. follow migration plan in docs/plans/migration-plan.md
+2. follow migration plan in docs/plans/completed/migration-plan.md
 3. ensure go.mod is up to date
 
 ### Adding New Features
@@ -247,7 +247,7 @@ if score > threshold {
 
 ## References
 
-- Migration plan: docs/plans/migration-plan.md
+- Migration plan: docs/plans/completed/migration-plan.md
 - Python implementation: ~/.dot-files/claude/local-docs-mcp.py
 - MCP SDK: https://github.com/modelcontextprotocol/go-sdk
 - Global guidelines: ~/.dot-files/CLAUDE.md

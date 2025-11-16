@@ -590,3 +590,125 @@ func TestCachedScanner_RapidFileChanges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, files, 1, "should still see file after debounced changes")
 }
+
+func TestNewCachedScanner_WatcherAddFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	// create a file in commands dir
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "test.md"), []byte("test"), 0600))
+
+	// make commands directory unreadable to test addWatchRecursive error handling
+	require.NoError(t, os.Chmod(commandsDir, 0000))
+	defer os.Chmod(commandsDir, 0755) // restore for cleanup
+
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
+	cached, err := NewCachedScanner(scanner, 1*time.Hour)
+
+	// should succeed even if addWatchRecursive fails - watcher errors are non-fatal
+	require.NoError(t, err)
+	require.NotNil(t, cached)
+	assert.NotNil(t, cached.cache)
+	assert.NotNil(t, cached.watcher, "watcher should be created even if adding dirs fails")
+
+	cached.Close()
+}
+
+func TestCachedScanner_AddWatchRecursive_NestedDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+
+	// create nested directory structure
+	nestedDir := filepath.Join(commandsDir, "level1", "level2", "level3")
+	require.NoError(t, os.MkdirAll(nestedDir, 0755))
+
+	// create files at different levels
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "root.md"), []byte("root"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "level1", "l1.md"), []byte("l1"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(nestedDir, "l3.md"), []byte("l3"), 0600))
+
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
+	cached, err := NewCachedScanner(scanner, 1*time.Hour)
+	require.NoError(t, err)
+	defer cached.Close()
+
+	// verify watcher was initialized
+	require.NotNil(t, cached.watcher)
+
+	// addWatchRecursive should have been called during startWatcher
+	// verify it works by checking scan picks up all files
+	ctx := context.Background()
+	files, err := cached.Scan(ctx)
+	require.NoError(t, err)
+	assert.Len(t, files, 3, "should find all files in nested structure")
+}
+
+func TestCachedScanner_AddWatchRecursive_HiddenDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	// create hidden directory (should be skipped)
+	hiddenDir := filepath.Join(commandsDir, ".hidden")
+	require.NoError(t, os.MkdirAll(hiddenDir, 0755))
+
+	// create files in both visible and hidden dirs
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "visible.md"), []byte("visible"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(hiddenDir, "hidden.md"), []byte("hidden"), 0600))
+
+	scanner := NewScanner(Params{CommandsDir: commandsDir, MaxFileSize: 1024 * 1024, ExcludeDirs: []string{"plans"}})
+	cached, err := NewCachedScanner(scanner, 1*time.Hour)
+	require.NoError(t, err)
+	defer cached.Close()
+
+	ctx := context.Background()
+	files, err := cached.Scan(ctx)
+	require.NoError(t, err)
+
+	// should only find visible file, hidden dir should be skipped
+	assert.Len(t, files, 1, "should skip hidden directories")
+	assert.Equal(t, "visible.md", files[0].Name)
+}
+
+func TestCachedScanner_AddWatchRecursive_ExcludedDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, "commands")
+	docsDir := filepath.Join(tmpDir, "docs")
+	require.NoError(t, os.MkdirAll(commandsDir, 0755))
+	require.NoError(t, os.MkdirAll(docsDir, 0755))
+
+	// create excluded directory in docs (not commands - commands doesn't exclude by default)
+	excludedDir := filepath.Join(docsDir, "plans")
+	require.NoError(t, os.MkdirAll(excludedDir, 0755))
+
+	// create files in both normal and excluded dirs
+	require.NoError(t, os.WriteFile(filepath.Join(commandsDir, "command.md"), []byte("command"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(docsDir, "normal.md"), []byte("normal"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(excludedDir, "plan.md"), []byte("plan"), 0600))
+
+	scanner := NewScanner(Params{
+		CommandsDir:    commandsDir,
+		ProjectDocsDir: docsDir,
+		MaxFileSize:    1024 * 1024,
+		ExcludeDirs:    []string{"plans"},
+	})
+	cached, err := NewCachedScanner(scanner, 1*time.Hour)
+	require.NoError(t, err)
+	defer cached.Close()
+
+	ctx := context.Background()
+	files, err := cached.Scan(ctx)
+	require.NoError(t, err)
+
+	// should find command.md and normal.md but not plan.md in excluded plans dir
+	assert.Len(t, files, 2, "should exclude 'plans' directory from project docs")
+
+	fileNames := make([]string, len(files))
+	for i, f := range files {
+		fileNames[i] = f.Name
+	}
+	assert.Contains(t, fileNames, "command.md")
+	assert.Contains(t, fileNames, "normal.md")
+	assert.NotContains(t, fileNames, "plan.md")
+}
