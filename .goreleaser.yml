@@ -42,6 +42,7 @@ archives:
     files:
       - LICENSE
       - README.md
+      - completions/*
     rlcp: true
 
 brews:
@@ -59,6 +60,10 @@ brews:
     homepage: "https://github.com/umputun/local-docs-mcp"
     description: "MCP server for local documentation access"
     license: "MIT"
+    extra_install: |
+      bash_completion.install "completions/local-docs-mcp.bash" => "local-docs-mcp"
+      zsh_completion.install "completions/local-docs-mcp.zsh" => "_local-docs-mcp"
+      fish_completion.install "completions/local-docs-mcp.fish" => "local-docs-mcp.fish"
 
 
 nfpms:
@@ -77,3 +82,10 @@ nfpms:
     bindir: /usr/bin
     epoch: 1
     release: 1
+    contents:
+      - src: completions/local-docs-mcp.bash
+        dst: /usr/share/bash-completion/completions/local-docs-mcp
+      - src: completions/local-docs-mcp.zsh
+        dst: /usr/share/zsh/vendor-completions/_local-docs-mcp
+      - src: completions/local-docs-mcp.fish
+        dst: /usr/share/fish/vendor_completions.d/local-docs-mcp.fish

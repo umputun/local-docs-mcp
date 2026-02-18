@@ -49,7 +49,9 @@ func main() {
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	slog.SetDefault(slog.New(handler))
 
-	slog.Info("starting local-docs MCP server", "version", revision)
+	if os.Getenv("GO_FLAGS_COMPLETION") == "" {
+		slog.Info("starting local-docs MCP server", "version", revision)
+	}
 
 	// use embedded function to properly handle defer before os.Exit
 	os.Exit(func() int {
