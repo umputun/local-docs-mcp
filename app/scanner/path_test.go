@@ -142,7 +142,7 @@ func TestSafeResolvePath_PreventsDotDotTraversal(t *testing.T) {
 func TestSafeResolvePath_Symlinks(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// create file inside tmpDir
+	// create file inside tmpDir, reachable via direct path and via intra-base symlink
 	insideFile := filepath.Join(tmpDir, "inside.md")
 	require.NoError(t, os.WriteFile(insideFile, []byte("inside"), 0600))
 
@@ -151,23 +151,57 @@ func TestSafeResolvePath_Symlinks(t *testing.T) {
 	outsideFile := filepath.Join(outsideDir, "outside.md")
 	require.NoError(t, os.WriteFile(outsideFile, []byte("outside"), 0600))
 
-	// create symlink from inside pointing to outside
-	symlinkPath := filepath.Join(tmpDir, "symlink.md")
-	err := os.Symlink(outsideFile, symlinkPath)
-	if err != nil {
-		t.Skip("symlink creation not supported")
-	}
+	t.Run("symlink pointing outside base must be rejected", func(t *testing.T) {
+		symlinkPath := filepath.Join(tmpDir, "escape.md")
+		if err := os.Symlink(outsideFile, symlinkPath); err != nil {
+			t.Skip("symlink creation not supported")
+		}
+		defer os.Remove(symlinkPath)
 
-	// attempt to access file via symlink
-	// note: symlinks are followed by filepath.Abs/Clean, but filepath.Rel check catches traversal
-	resolved, err := SafeResolvePath(tmpDir, "symlink.md", 1024*1024)
-	// if symlink points outside base dir, filepath.Rel should detect it
-	if err == nil {
-		// on some systems symlink might not be followed or check might not catch it
-		t.Logf("symlink resolved to: %s", resolved)
-	} else {
-		// expected behavior - symlink traversal detected
+		_, err := SafeResolvePath(tmpDir, "escape.md", 1024*1024)
+		require.Error(t, err, "symlink escape must be rejected")
 		assert.Contains(t, err.Error(), "path traversal")
+	})
+
+	t.Run("symlink to outside directory must be rejected", func(t *testing.T) {
+		symlinkDir := filepath.Join(tmpDir, "linkdir")
+		if err := os.Symlink(outsideDir, symlinkDir); err != nil {
+			t.Skip("symlink creation not supported")
+		}
+		defer os.Remove(symlinkDir)
+
+		_, err := SafeResolvePath(tmpDir, "linkdir/outside.md", 1024*1024)
+		require.Error(t, err, "directory symlink escape must be rejected")
+		assert.Contains(t, err.Error(), "path traversal")
+	})
+
+	t.Run("intra-base symlink must be allowed", func(t *testing.T) {
+		symlinkPath := filepath.Join(tmpDir, "alias.md")
+		if err := os.Symlink(insideFile, symlinkPath); err != nil {
+			t.Skip("symlink creation not supported")
+		}
+		defer os.Remove(symlinkPath)
+
+		_, err := SafeResolvePath(tmpDir, "alias.md", 1024*1024)
+		require.NoError(t, err, "symlink staying inside base must be allowed")
+	})
+}
+
+func TestSafeResolvePath_DotsInFilename(t *testing.T) {
+	// filenames containing ".." substrings are not path traversal and must be allowed
+	tmpDir := t.TempDir()
+
+	tests := []string{"a..b.md", "....md", "foo..bar.md", "...md"}
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			full := filepath.Join(tmpDir, name)
+			require.NoError(t, os.WriteFile(full, []byte("ok"), 0600))
+			defer os.Remove(full)
+
+			got, err := SafeResolvePath(tmpDir, name, 1024*1024)
+			require.NoError(t, err, "filename containing dots must be accepted")
+			assert.Equal(t, full, got)
+		})
 	}
 }
 
@@ -185,9 +219,9 @@ func TestSafeResolvePath_MalformedPaths(t *testing.T) {
 			errMsg:   "failed to stat file", // os.Stat returns "invalid argument" for null bytes
 		},
 		{
-			name:     "only dots",
+			name:     "only dots resolves to non-existent file",
 			userPath: "...",
-			errMsg:   "path traversal",
+			errMsg:   "file not found",
 		},
 		{
 			name:     "mixed slashes and dots",
