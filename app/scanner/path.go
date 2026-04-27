@@ -37,28 +37,18 @@ func SafeResolvePath(baseDir, userPath string, maxSize int64) (string, error) {
 		userPath += ".md"
 	}
 
-	// clean the path to normalize it
 	userPath = filepath.Clean(userPath)
 
-	// check for path traversal attempts
-	if strings.Contains(userPath, "..") {
+	// catch above-root traversal lexically. Clean preserves leading "..", so a
+	// rooted match here is precise -- unlike strings.Contains(.., ".."), which
+	// false-positives on legitimate filenames like "a..b.md" or "....md".
+	if userPath == ".." || strings.HasPrefix(userPath, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path traversal not allowed: %s", userPath)
 	}
 
-	// resolve to absolute path
 	absPath := filepath.Join(baseDir, userPath)
 
-	// verify the resolved path is still within baseDir
-	cleanBase := filepath.Clean(baseDir)
-	cleanPath := filepath.Clean(absPath)
-
-	relPath, err := filepath.Rel(cleanBase, cleanPath)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		return "", fmt.Errorf("path traversal not allowed: resolved path outside base directory")
-	}
-
-	// check file exists
-	info, err := os.Stat(absPath)
+	info, err := os.Lstat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s", userPath)
@@ -66,7 +56,29 @@ func SafeResolvePath(baseDir, userPath string, maxSize int64) (string, error) {
 		return "", fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	// check file size
+	// resolve symlinks on both ends and compare real paths so a symlink
+	// inside baseDir cannot smuggle access to a target outside it.
+	realBase, err := filepath.EvalSymlinks(filepath.Clean(baseDir))
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base directory: %w", err)
+	}
+	realPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve path: %w", err)
+	}
+	relPath, err := filepath.Rel(realBase, realPath)
+	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path traversal not allowed: resolved path outside base directory")
+	}
+
+	// size check uses Stat (follows symlinks) so we measure the real target,
+	// not the symlink entry from Lstat above.
+	if info.Mode()&os.ModeSymlink != 0 {
+		info, err = os.Stat(realPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to stat file: %w", err)
+		}
+	}
 	if info.Size() > maxSize {
 		return "", fmt.Errorf("file too large: %d bytes (max %d)", info.Size(), maxSize)
 	}
